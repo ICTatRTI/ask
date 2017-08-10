@@ -37,17 +37,11 @@ defmodule Ask.RespondentView do
     }
   end
 
-  def render("stats.json", %{stats: %{id: id, respondents_by_disposition: respondents_by_disposition, reference: questionnaires, cumulative_percentages: cumulative_percentages, contacted_respondents: contacted_respondents, total_respondents: total_respondents, completion_percentage: completion_percentage}}) do
-
-    qs = questionnaires
-      |> Enum.map(fn q ->
-        %{id: q.id, name: q.name}
-      end)
-
+  def render("stats.json", %{stats: %{id: id, respondents_by_disposition: respondents_by_disposition, reference: reference, cumulative_percentages: cumulative_percentages, contacted_respondents: contacted_respondents, total_respondents: total_respondents, completion_percentage: completion_percentage}}) do
     %{
       data: %{
         id: id,
-        reference: qs,
+        reference: reference,
         respondents_by_disposition: respondents_by_disposition,
         cumulative_percentages:
           cumulative_percentages
@@ -85,6 +79,10 @@ defmodule Ask.RespondentView do
     condition =
       bucket.condition
       |> Enum.reduce([], fn {store, value}, conditions ->
+        value = case value do
+          [lower, upper] -> "#{lower} - #{upper}"
+          _ -> value
+        end
         ["#{store}: #{value}" | conditions]
       end)
       |> Enum.join(" - ")

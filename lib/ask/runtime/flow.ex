@@ -86,8 +86,8 @@ defmodule Ask.Runtime.Flow do
   end
 
   defp accept_reply(flow, :no_reply, visitor, _mode) do
-    if flow.retries >=  @max_retries do
-      :failed
+    if flow.retries >= @max_retries do
+      {:no_retries_left, %{flow | retries: 0}}
     else
       {%{flow | retries: flow.retries + 1}, %Reply{}, visitor}
     end
@@ -126,8 +126,8 @@ defmodule Ask.Runtime.Flow do
 
     case reply_value do
       :invalid_answer ->
-        if flow.retries >=  @max_retries do
-          :failed
+        if flow.retries >= @max_retries do
+          {:no_retries_left, %{flow | retries: 0}}
         else
           visitor = visitor |> Visitor.accept_message(flow.questionnaire.settings["error_message"], flow.language, "Error")
           {%{flow | retries: flow.retries + 1}, %Reply{}, visitor}
@@ -136,7 +136,7 @@ defmodule Ask.Runtime.Flow do
         flow = flow |> advance_current_step(step, reply_value, mode)
         {%{flow | retries: 0}, %Reply{}, visitor}
       {:refusal, reply_value} ->
-        advance_after_reply(flow, step, reply_value, visitor, mode, stores: [])
+        advance_after_reply(flow, step, reply_value, visitor, mode, stores: %{step["store"] => "REFUSED"})
       reply_value ->
         advance_after_reply(flow, step, reply_value, visitor, mode, stores: %{step["store"] => reply_value})
     end
@@ -218,8 +218,8 @@ defmodule Ask.Runtime.Flow do
     {:stopped, nil, %Reply{disposition: "refused"}}
   end
 
-  defp eval(:failed, _mode) do
-    {:failed, nil, %Reply{}}
+  defp eval({:no_retries_left, flow}, _mode) do
+    {:no_retries_left, flow, %Reply{}}
   end
 
   defp eval({flow, state, visitor}, mode) do

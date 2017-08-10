@@ -116,7 +116,7 @@ class SurveyShow extends Component {
     )
   }
 
-  modesForComparisons(modes: string[], index) {
+  modesForComparisons(modes: string[]) {
     let modesForComparisons = modes.map((m, index) => {
       return this.modeForComparison(m)
     })
@@ -133,15 +133,7 @@ class SurveyShow extends Component {
       modeDescriptions = modesForComparisons
     }
 
-    const letter = this.letterForIndex(index)
-    return (
-      <div className='mode' key={letter}>
-        <label className='grey-text'>{'Mode ' + letter}</label>
-        <div>
-          {modeDescriptions}
-        </div>
-      </div>
-    )
+    return modeDescriptions
   }
 
   colorReferences(references) {
@@ -152,10 +144,13 @@ class SurveyShow extends Component {
     if (numberOfKeys > 1) {
       let i = 0
       for (var referenceId in references) {
+        const name = references[referenceId].name ? references[referenceId].name : null
+        const modes = references[referenceId].modes ? this.modesForComparisons(references[referenceId].modes) : null
+        const separator = name && modes ? (<div />) : null
         colorReferences.push((
           <div className='questionnaire-color-reference' key={referenceId}>
             <div className={`color-circle-reference ${referenceClasses[i]}`} />
-            <div className='questionnaire-name'> {references[referenceId].name} </div>
+            <div className='questionnaire-name'> {name}{separator}{modes} </div>
           </div>
         ))
         i += 1
@@ -190,11 +185,6 @@ class SurveyShow extends Component {
       modes = <div className='survey-modes'>
         {survey.mode[0].map((mode, index) => (this.modeFor(index, mode)))}
       </div>
-    } else {
-      modes = survey.mode.map((modes, index) => (<div className='survey-modes' key={String(index)}>
-        {this.modesForComparisons(modes, index)}
-      </div>)
-      )
     }
 
     const readOnly = !project || project.readOnly
@@ -216,14 +206,14 @@ class SurveyShow extends Component {
       <div className='row'>
         {stopComponent}
         <ConfirmationModal modalId='survey_show_stop_modal' ref='stopConfirmationModal' confirmationText='STOP' header='Stop survey' showCancel />
-        <div className='col s12 m8'>
+        <div className='col s12 m9 l8'>
           <h4>
             {title}
           </h4>
           <SurveyStatus survey={survey} />
           {this.dispositions(respondentsByDisposition, reference)}
         </div>
-        <div className='col s12 m4'>
+        <div className='col s12 m3 l4'>
           <div className='row questionnaires-color-references'>
             {this.colorReferences(reference)}
           </div>
@@ -231,7 +221,7 @@ class SurveyShow extends Component {
           <div className='row survey-chart'>
             <div className='col s12'>
               <label className='grey-text'>
-                { completionPercentage + '% of target completed' }
+                { this.round(completionPercentage) + '% of target completed' }
               </label>
             </div>
           </div>
@@ -346,7 +336,7 @@ class SurveyShow extends Component {
     const dispositionsGroup = ['responsive', 'contacted', 'uncontacted']
     let referenceIds = Object.keys(reference)
     return (
-      <div className='card'>
+      <div className='card overflow'>
         <div className='card-table-title'>
           Dispositions
         </div>

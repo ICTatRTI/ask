@@ -63,6 +63,7 @@ const dataReducer = (state: Questionnaire, action): Questionnaire => {
     case actions.CHANGE_DISPOSITION: return changeDisposition(state, action)
     case actions.TOGGLE_ACCEPT_REFUSALS: return toggleAcceptsRefusals(state, action)
     case actions.CHANGE_REFUSAL: return changeRefusal(state, action)
+    case actions.SET_DIRTY: return setDirty(state)
     default: return state
   }
 }
@@ -94,6 +95,7 @@ const validateReducer = (reducer: StoreReducer<Questionnaire>): StoreReducer<Que
 const dirtyPredicate = (action, oldData, newData) => {
   switch (action.type) {
     case actions.SET_ACTIVE_LANGUAGE: return false
+    case actions.SET_ACTIVE_MODE: return false
     default: return true
   }
 }
@@ -1026,6 +1028,10 @@ export const csvForTranslation = (questionnaire: Questionnaire) => {
     addMessageToCsvForTranslation(questionnaire.settings.errorMessage, defaultLang, context)
   }
 
+  if (questionnaire.settings.thankYouMessage) {
+    addMessageToCsvForTranslation(questionnaire.settings.thankYouMessage, defaultLang, context)
+  }
+
   if (questionnaire.settings.title) {
     const defaultTitle = questionnaire.settings.title[defaultLang]
     if (defaultTitle && defaultTitle.trim().length != 0) {
@@ -1317,12 +1323,19 @@ const uploadCsvForTranslation = (state, action) => {
   if (state.settings.errorMessage) {
     newState.settings.errorMessage = translatePrompt(state.settings.errorMessage, defaultLanguage, lookup)
   }
+
+  if (state.settings.thankYouMessage) {
+    newState.settings.thankYouMessage = translatePrompt(state.settings.thankYouMessage, defaultLanguage, lookup)
+  }
+
   if (state.settings.title) {
     newState.settings.title = translateLanguage(state.settings.title, defaultLanguage, lookup)
   }
+
   if (state.settings.title) {
     newState.settings.surveyAlreadyTakenMessage = translateLanguage(state.settings.surveyAlreadyTakenMessage, defaultLanguage, lookup)
   }
+
   return newState
 }
 
@@ -1341,7 +1354,7 @@ const translateStep = (step, defaultLanguage, lookup): Step => {
   return ((newStep: any): Step)
 }
 
-const translatePrompt = (prompt, defaultLanguage, lookup): Prompt => {
+const translatePrompt = (prompt, defaultLanguage, lookup): LocalizedPrompt => {
   let defaultLanguagePrompt = prompt[defaultLanguage]
   if (!defaultLanguagePrompt) return prompt
 
@@ -1537,3 +1550,5 @@ const setSecondaryColor = (state, action) => {
     }
   }
 }
+
+const setDirty = (state) => ({...state})

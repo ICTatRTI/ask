@@ -10,6 +10,7 @@ import * as language from '../../language'
 import * as routes from '../../routes'
 import * as api from '../../api'
 import { ConfirmationModal, Dropdown, DropdownItem } from '../ui'
+import withQuestionnaire from './withQuestionnaire'
 
 class QuestionnaireMenu extends Component {
   static propTypes = {
@@ -135,6 +136,7 @@ class QuestionnaireMenu extends Component {
       this.props.uiActions.deselectStep()
       this.props.uiActions.deselectQuotaCompletedStep()
       this.props.questionnaireActions.receive(questionnaire)
+      this.props.questionnaireActions.setDirty()
       importModal.close()
     })
 
@@ -164,10 +166,9 @@ class QuestionnaireMenu extends Component {
 
   render() {
     const { questionnaire, readOnly } = this.props
-    if (questionnaire == null) return null
 
     return (
-      <Dropdown className='title-options options' dataBelowOrigin={false} label={<i className='material-icons'>more_vert</i>}>
+      <Dropdown className='title-options options questionnaire-menu' dataBelowOrigin={false} label={<i className='material-icons'>more_vert</i>}>
         <DropdownItem className='dots'>
           <i className='material-icons'>more_vert</i>
         </DropdownItem>
@@ -177,14 +178,16 @@ class QuestionnaireMenu extends Component {
             <span>Export questionnaire</span>
           </a>
         </DropdownItem>
-        <DropdownItem>
-          <ConfirmationModal modalId='importModal' ref='importModal' header='Importing questionnaire' initOptions={{dismissible: false}} />
-          <input id='questionnaire_import_zip' type='file' accept='.zip' style={{display: 'none'}} onChange={e => this.importZip(e)} />
-          <a href='#' onClick={e => this.openImportZipDialog(e)}>
-            <i className='material-icons'>file_upload</i>
-            <span>Import questionnaire</span>
-          </a>
-        </DropdownItem>
+        { !readOnly
+          ? <DropdownItem>
+            <ConfirmationModal modalId='importModal' ref='importModal' header='Importing questionnaire' initOptions={{dismissible: false}} />
+            <input id='questionnaire_import_zip' type='file' accept='.zip' style={{display: 'none'}} onChange={e => this.importZip(e)} />
+            <a href='#' onClick={e => this.openImportZipDialog(e)}>
+              <i className='material-icons'>file_upload</i>
+              <span>Import questionnaire</span>
+            </a>
+          </DropdownItem>
+          : ''}
         { !readOnly
           ? <DropdownItem>
             <a href='#' onClick={e => this.downloadCsv(e)} download={`${questionnaire.name}.csv`}>
@@ -207,16 +210,13 @@ class QuestionnaireMenu extends Component {
   }
 }
 
-const mapStateToProps = (state, ownProps) => {
-  return {
-    questionnaire: state.questionnaire.data,
-    readOnly: state.project && state.project.data ? state.project.data.readOnly : true
-  }
-}
+const mapStateToProps = (state, ownProps) => ({
+  readOnly: state.project && state.project.data ? state.project.data.readOnly : true
+})
 
 const mapDispatchToProps = (dispatch) => ({
   questionnaireActions: bindActionCreators(questionnaireActions, dispatch),
   uiActions: bindActionCreators(uiActions, dispatch)
 })
 
-export default withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireMenu))
+export default withQuestionnaire(withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireMenu)))

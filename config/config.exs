@@ -14,6 +14,7 @@ config :ask, Ask.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "Tu6aeyZlhJeiTQDt7AjOIuk2tblnEnGYHyX/VpIcZi3ctSuE0T25j+BZLPiPMFWL",
   render_errors: [view: Ask.ErrorView, accepts: ~w(html json)],
+  instrumenters: [Ask.PhoenixInstrumenter],
   pubsub: [name: Ask.PubSub,
            adapter: Phoenix.PubSub.PG2]
 
@@ -43,6 +44,7 @@ config :ask, :channel,
 
 config :ask, Ask.Runtime.Broker,
   batch_size: {:system, "BROKER_BATCH_SIZE", 10},
+  batch_limit_per_minute: {:system, "BROKER_BATCH_LIMIT_PER_MINUTE", 100},
   initial_valid_respondent_rate: {:system, "INITIAL_VALID_RESPONDENT_RATE", 100},
   initial_eligibility_rate: {:system, "INITIAL_ELIGIBILITY_RATE", 100},
   initial_response_rate: {:system, "INITIAL_RESPONSE_RATE", 100}

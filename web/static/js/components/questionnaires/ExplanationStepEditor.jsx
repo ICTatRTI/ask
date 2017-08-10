@@ -6,7 +6,6 @@ import StepTypeSelector from './StepTypeSelector'
 import * as questionnaireActions from '../../actions/questionnaire'
 import StepPrompts from './StepPrompts'
 import StepCard from './StepCard'
-import DraggableStep from './DraggableStep'
 import StepDeleteButton from './StepDeleteButton'
 import SkipLogic from './SkipLogic'
 import propsAreEqual from '../../propsAreEqual'
@@ -17,7 +16,6 @@ type Props = {
   questionnaireActions: any,
   onDelete: Function,
   onCollapse: Function,
-  questionnaire: Questionnaire,
   errorPath: string,
   errorsByPath: ErrorsByPath,
   readOnly: boolean,
@@ -29,9 +27,6 @@ type Props = {
 
 type State = {
   stepTitle: string,
-  stepType: string,
-  stepPromptSms: string,
-  stepPromptIvr: string,
   skipLogic: ?string
 };
 
@@ -52,13 +47,9 @@ class ExplanationStepEditor extends Component {
 
   stateFromProps(props) {
     const { step } = props
-    const lang = props.questionnaire.defaultLanguage
 
     return {
       stepTitle: step.title,
-      stepType: step.type,
-      stepPromptSms: (step.prompt[lang] || {}).sms || '',
-      stepPromptIvr: ((step.prompt[lang] || {}).ivr || {}).text || '',
       skipLogic: step.skipLogic
     }
   }
@@ -75,45 +66,39 @@ class ExplanationStepEditor extends Component {
     const { step, stepIndex, onCollapse, stepsAfter, stepsBefore, onDelete, errorPath, errorsByPath, isNew, readOnly, quotaCompletedSteps } = this.props
 
     return (
-      <DraggableStep step={step} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps}>
-        <StepCard onCollapse={onCollapse} readOnly={readOnly} stepId={step.id} stepTitle={this.state.stepTitle} icon={<StepTypeSelector stepType={step.type} stepId={step.id} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps} />} >
-          <StepPrompts
-            step={step}
-            readOnly={readOnly}
-            stepIndex={stepIndex}
-            errorPath={errorPath}
-            errorsByPath={errorsByPath}
-            isNew={isNew}
-            classes='no-separator'
-            title='Message'
-          />
-          <li className='collection-item' key='editor'>
-            <div className='row'>
-              <div className='col s6'>
-                <SkipLogic
-                  onChange={skipOption => this.skipLogicChange(skipOption)}
-                  readOnly={readOnly}
-                  value={step.skipLogic}
-                  stepsAfter={stepsAfter}
-                  stepsBefore={stepsBefore}
-                  label='Skip logic'
-                />
-              </div>
+      <StepCard onCollapse={onCollapse} readOnly={readOnly} stepId={step.id} stepTitle={this.state.stepTitle} icon={<StepTypeSelector stepType={step.type} stepId={step.id} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps} />} >
+        <StepPrompts
+          step={step}
+          readOnly={readOnly}
+          stepIndex={stepIndex}
+          errorPath={errorPath}
+          errorsByPath={errorsByPath}
+          isNew={isNew}
+          classes='no-separator'
+          title='Message'
+        />
+        <li className='collection-item' key='editor'>
+          <div className='row'>
+            <div className='col s6'>
+              <SkipLogic
+                onChange={skipOption => this.skipLogicChange(skipOption)}
+                readOnly={readOnly}
+                value={step.skipLogic}
+                stepsAfter={stepsAfter}
+                stepsBefore={stepsBefore}
+                label='Skip logic'
+              />
             </div>
-          </li>
-          {readOnly ? null : <StepDeleteButton onDelete={onDelete} /> }
-        </StepCard>
-      </DraggableStep>
+          </div>
+        </li>
+        {readOnly ? null : <StepDeleteButton onDelete={onDelete} /> }
+      </StepCard>
     )
   }
 }
-
-const mapStateToProps = (state, ownProps) => ({
-  questionnaire: state.questionnaire.data
-})
 
 const mapDispatchToProps = (dispatch) => ({
   questionnaireActions: bindActionCreators(questionnaireActions, dispatch)
 })
 
-export default connect(mapStateToProps, mapDispatchToProps)(ExplanationStepEditor)
+export default connect(null, mapDispatchToProps)(ExplanationStepEditor)

@@ -96,16 +96,68 @@ defmodule Ask.RespondentController do
   end
 
   defp stats(conn, survey, []) do
-    stats(
-      conn,
-      survey,
-      survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
-      respondents_by_questionnaire_and_disposition(survey),
-      respondents_by_questionnaire_and_completed_at(survey),
-      (survey |> Repo.preload(:questionnaires)).questionnaires,
-      (survey |> Repo.preload(:quota_buckets)).quota_buckets,
-      "stats.json"
-    )
+    questionnaires = (survey |> Repo.preload(:questionnaires)).questionnaires
+    if length(questionnaires) > 1 && length(survey.mode) > 1 do
+      reference = questionnaires
+      |> Enum.reduce([], fn(questionnaire, reference) ->
+        survey.mode
+        |> Enum.reduce(reference, fn(modes, reference) ->
+          reference ++ [%{
+            id: "#{questionnaire.id}#{modes |> Enum.join("")}",
+            name: questionnaire.name,
+            modes: modes
+          }]
+        end)
+      end)
+
+      stats(
+        conn,
+        survey,
+        survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
+        respondents_by_questionnaire_mode_and_disposition(survey),
+        respondents_by_questionnaire_mode_and_completed_at(survey),
+        reference,
+        [],
+        "stats.json"
+      )
+    else
+      if length(survey.mode) > 1 do
+        reference = survey.mode
+        |> Enum.map(fn(modes) ->
+          %{
+            id: modes |> Enum.join(""),
+            modes: modes
+          }
+        end)
+
+        stats(
+          conn,
+          survey,
+          survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
+          respondents_by_mode_and_disposition(survey),
+          respondents_by_mode_and_completed_at(survey),
+          reference,
+          [],
+          "stats.json"
+        )
+      else
+        reference = questionnaires
+        |> Enum.map(fn q ->
+          %{id: q.id, name: q.name}
+        end)
+
+        stats(
+          conn,
+          survey,
+          survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
+          respondents_by_questionnaire_and_disposition(survey),
+          respondents_by_questionnaire_and_completed_at(survey),
+          reference,
+          [],
+          "stats.json"
+        )
+      end
+    end
   end
 
   defp stats(conn, survey, _) do
@@ -250,6 +302,29 @@ defmodule Ask.RespondentController do
       select: {r.state, r.disposition, r.questionnaire_id, count("*")})
   end
 
+  defp respondents_by_questionnaire_mode_and_disposition(survey) do
+    Repo.all(
+      from r in Respondent, where: r.survey_id == ^survey.id,
+      group_by: [:state, :disposition, :questionnaire_id, :mode],
+      select: {r.state, r.disposition, r.questionnaire_id, r.mode, count("*")})
+    |> Enum.map(fn({state, disposition, questionnaire_id, mode, count}) ->
+      reference_id = if mode && questionnaire_id do
+        "#{questionnaire_id}#{mode |> Enum.join("")}"
+      else
+        nil
+      end
+
+      {state, disposition, reference_id, count}
+    end)
+  end
+
+  defp respondents_by_mode_and_disposition(survey) do
+    Repo.all(
+      from r in Respondent, where: r.survey_id == ^survey.id,
+      group_by: [:state, :disposition, :mode],
+      select: {r.state, r.disposition, r.mode, count("*")})
+  end
+
   defp respondents_by_bucket_and_disposition(survey) do
     Repo.all(
       from r in Respondent, where: r.survey_id == ^survey.id,
@@ -263,6 +338,31 @@ defmodule Ask.RespondentController do
       group_by: fragment("questionnaire_id, DATE(completed_at)"),
       order_by: fragment("DATE(completed_at) ASC"),
       select: {r.questionnaire_id, fragment("DATE(completed_at)"), count("*")})
+  end
+
+  defp respondents_by_questionnaire_mode_and_completed_at(survey) do
+    Repo.all(
+      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
+      group_by: fragment("questionnaire_id, mode, DATE(completed_at)"),
+      order_by: fragment("DATE(completed_at) ASC"),
+      select: {r.questionnaire_id, r.mode, fragment("DATE(completed_at)"), count("*")})
+    |> Enum.map(fn({questionnaire_id, mode, completed_at, count}) ->
+      reference_id = if mode && questionnaire_id do
+        "#{questionnaire_id}#{mode |> Enum.join("")}"
+      else
+        nil
+      end
+
+      {reference_id, completed_at, count}
+    end)
+  end
+
+  defp respondents_by_mode_and_completed_at(survey) do
+    Repo.all(
+      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
+      group_by: fragment("mode, DATE(completed_at)"),
+      order_by: fragment("DATE(completed_at) ASC"),
+      select: {r.mode, fragment("DATE(completed_at)"), count("*")})
   end
 
   defp respondents_by_quota_bucket_and_completed_at(survey) do
@@ -296,6 +396,8 @@ defmodule Ask.RespondentController do
     |> assoc(:surveys)
     |> Repo.get!(survey_id)
 
+    tz_offset = Survey.timezone_offset(survey)
+
     questionnaires = (survey |> Repo.preload(:questionnaires)).questionnaires
     has_comparisons = length(survey.comparisons) > 0
 
@@ -326,7 +428,7 @@ defmodule Ask.RespondentController do
         end
 
         row = if date do
-          row ++ [date |> Timex.format!("%b %e, %Y %H:%M #{Survey.timezone_offset(survey)}", :strftime)]
+          row ++ [date |> Timex.format!("%b %e, %Y %H:%M #{tz_offset}", :strftime)]
         else
           row ++ ["-"]
         end
@@ -393,18 +495,8 @@ defmodule Ask.RespondentController do
     header = header ++ ["Disposition"]
     rows = Stream.concat([[header], csv_rows])
 
-    # # Convert to CSV string
-    csv = rows
-    |> CSV.encode
-    |> Enum.to_list
-    |> to_string
-
     filename = csv_filename(survey, "respondents")
-
-    conn
-      |> put_resp_content_type("text/csv")
-      |> put_resp_header("content-disposition", "attachment; filename=\"#{filename}\"")
-      |> send_resp(200, csv)
+    conn |> csv_stream(rows, filename)
   end
 
   def disposition_history_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
@@ -416,6 +508,7 @@ defmodule Ask.RespondentController do
     |> assoc(:surveys)
     |> Repo.get!(survey_id)
 
+    tz_offset = Survey.timezone_offset(survey)
     csv_rows = (from h in RespondentDispositionHistory,
       join: r in Respondent,
       where: h.respondent_id == r.id and r.survey_id == ^survey.id,
@@ -425,25 +518,15 @@ defmodule Ask.RespondentController do
     |> Stream.map(fn history ->
       date = history.inserted_at
       |> Survey.adjust_timezone(survey)
-      |> Timex.format!("%Y-%m-%d %H:%M:%S #{Survey.timezone_offset(survey)}", :strftime)
+      |> Timex.format!("%Y-%m-%d %H:%M:%S #{tz_offset}", :strftime)
       [history.respondent.hashed_number, history.disposition, mode_label([history.mode]), date]
     end)
 
     header = ["Respondent ID", "Disposition", "Mode", "Timestamp"]
     rows = Stream.concat([[header], csv_rows])
 
-    # Convert to CSV string
-    csv = rows
-    |> CSV.encode
-    |> Enum.to_list
-    |> to_string
-
     filename = csv_filename(survey, "respondents_disposition_history")
-
-    conn
-      |> put_resp_content_type("text/csv")
-      |> put_resp_header("content-disposition", "attachment; filename=\"#{filename}\"")
-      |> send_resp(200, csv)
+    conn |> csv_stream(rows, filename)
   end
 
   def incentives_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
@@ -467,18 +550,8 @@ defmodule Ask.RespondentController do
     header = ["Telephone number", "Questionnaire-Mode"]
     rows = Stream.concat([[header], csv_rows])
 
-    # Convert to CSV string
-    csv = rows
-    |> CSV.encode
-    |> Enum.to_list
-    |> to_string
-
     filename = csv_filename(survey, "respondents_incentives")
-
-    conn
-      |> put_resp_content_type("text/csv")
-      |> put_resp_header("content-disposition", "attachment; filename=\"#{filename}\"")
-      |> send_resp(200, csv)
+    conn |> csv_stream(rows, filename)
   end
 
   def interactions_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
@@ -511,6 +584,8 @@ defmodule Ask.RespondentController do
       end,
       fn _ -> [] end)
 
+    tz_offset = Survey.timezone_offset(survey)
+
     csv_rows = log_stream
     |> Stream.map(fn e ->
       channel_name =
@@ -525,7 +600,7 @@ defmodule Ask.RespondentController do
 
       timestamp = e.timestamp
       |> Survey.adjust_timezone(survey)
-      |> Timex.format!("%Y-%m-%d %H:%M:%S #{Survey.timezone_offset(survey)}", :strftime)
+      |> Timex.format!("%Y-%m-%d %H:%M:%S #{tz_offset}", :strftime)
 
       [e.respondent_hashed_number, interactions_mode_label(e.mode), channel_name, disposition, action_type, e.action_data, timestamp]
     end)
@@ -533,18 +608,8 @@ defmodule Ask.RespondentController do
     header = ["Respondent ID", "Mode", "Channel", "Disposition", "Action Type", "Action Data", "Timestamp"]
     rows = Stream.concat([[header], csv_rows])
 
-    # Convert to CSV string
-    csv = rows
-    |> CSV.encode
-    |> Enum.to_list
-    |> to_string
-
     filename = csv_filename(survey, "respondents_interactions")
-
-    conn
-      |> put_resp_content_type("text/csv")
-      |> put_resp_header("content-disposition", "attachment; filename=\"#{filename}\"")
-      |> send_resp(200, csv)
+    conn |> csv_stream(rows, filename)
   end
 
   defp mask_phone_numbers(respondents) do

@@ -7,11 +7,10 @@ import * as questionnaireActions from '../../actions/questionnaire'
 import StepPrompts from './StepPrompts'
 import StepCard from './StepCard'
 import StepNumericEditor from './StepNumericEditor'
-import DraggableStep from './DraggableStep'
 import StepDeleteButton from './StepDeleteButton'
 import StepStoreVariable from './StepStoreVariable'
-import { getStepPromptSms, getStepPromptIvrText } from '../../step'
 import propsAreEqual from '../../propsAreEqual'
+import withQuestionnaire from './withQuestionnaire'
 
 type Props = {
   step: NumericStep,
@@ -30,10 +29,7 @@ type Props = {
 };
 
 type State = {
-  stepTitle: string,
-  stepType: string,
-  stepPromptSms: string,
-  stepPromptIvr: string
+  stepTitle: string
 };
 
 class NumericStepEditor extends Component {
@@ -53,13 +49,9 @@ class NumericStepEditor extends Component {
 
   stateFromProps(props) {
     const { step } = props
-    const lang = props.questionnaire.activeLanguage
 
     return {
-      stepTitle: step.title,
-      stepType: step.type,
-      stepPromptSms: getStepPromptSms(step, lang),
-      stepPromptIvr: getStepPromptIvrText(step, lang)
+      stepTitle: step.title
     }
   }
 
@@ -67,47 +59,41 @@ class NumericStepEditor extends Component {
     const { step, stepIndex, onCollapse, questionnaire, readOnly, quotaCompletedSteps, stepsAfter, stepsBefore, onDelete, errorPath, errorsByPath, isNew } = this.props
 
     return (
-      <DraggableStep step={step} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps}>
-        <StepCard onCollapse={onCollapse} readOnly={readOnly} stepId={step.id} stepTitle={this.state.stepTitle} icon={<StepTypeSelector stepType={step.type} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps} stepId={step.id} />} >
-          <StepPrompts
-            step={step}
-            readOnly={readOnly}
-            stepIndex={stepIndex}
-            errorPath={errorPath}
-            errorsByPath={errorsByPath}
-            isNew={isNew}
-            />
-          <li className='collection-item' key='editor'>
-            <div className='row'>
-              <div className='col s12'>
-                <StepNumericEditor
-                  questionnaire={questionnaire}
-                  readOnly={readOnly}
-                  step={step}
-                  stepIndex={stepIndex}
-                  stepsAfter={stepsAfter}
-                  stepsBefore={stepsBefore}
-                  errorPath={errorPath}
-                  errorsByPath={errorsByPath}
-                  isNew={isNew}
-                  />
-              </div>
+      <StepCard onCollapse={onCollapse} readOnly={readOnly} stepId={step.id} stepTitle={this.state.stepTitle} icon={<StepTypeSelector stepType={step.type} readOnly={readOnly} quotaCompletedSteps={quotaCompletedSteps} stepId={step.id} />} >
+        <StepPrompts
+          step={step}
+          readOnly={readOnly}
+          stepIndex={stepIndex}
+          errorPath={errorPath}
+          errorsByPath={errorsByPath}
+          isNew={isNew}
+          />
+        <li className='collection-item' key='editor'>
+          <div className='row'>
+            <div className='col s12'>
+              <StepNumericEditor
+                questionnaire={questionnaire}
+                readOnly={readOnly}
+                step={step}
+                stepIndex={stepIndex}
+                stepsAfter={stepsAfter}
+                stepsBefore={stepsBefore}
+                errorPath={errorPath}
+                errorsByPath={errorsByPath}
+                isNew={isNew}
+                />
             </div>
-          </li>
-          <StepStoreVariable step={step} readOnly={readOnly} errorPath={errorPath} errorsByPath={errorsByPath} />
-          {readOnly ? null : <StepDeleteButton onDelete={onDelete} /> }
-        </StepCard>
-      </DraggableStep>
+          </div>
+        </li>
+        <StepStoreVariable step={step} readOnly={readOnly} errorPath={errorPath} errorsByPath={errorsByPath} />
+        {readOnly ? null : <StepDeleteButton onDelete={onDelete} /> }
+      </StepCard>
     )
   }
 }
-
-const mapStateToProps = (state, ownProps) => ({
-  questionnaire: state.questionnaire.data
-})
 
 const mapDispatchToProps = (dispatch) => ({
   questionnaireActions: bindActionCreators(questionnaireActions, dispatch)
 })
 
-export default connect(mapStateToProps, mapDispatchToProps)(NumericStepEditor)
+export default connect(null, mapDispatchToProps)(withQuestionnaire(NumericStepEditor))

@@ -275,7 +275,8 @@ defmodule Ask.FlowTest do
 
     step = flow |> Flow.step(@sms_visitor, Flow.Message.reply("x"))
 
-    assert {:failed, _, _} = step
+    # assert {:failed, _, _} = step
+    assert {:no_retries_left, _, _} = step
   end
 
   test "retry step 2 times, then valid answer, then retry 3 times (ivr mode)" do
@@ -325,7 +326,8 @@ defmodule Ask.FlowTest do
 
     step = flow |> Flow.step(@ivr_visitor, Flow.Message.reply("8"))
 
-    assert {:failed, _, _} = step
+    # assert {:failed, _, _} = step
+    assert {:no_retries_left, _, _} = step
   end
 
   test "mark as failed when no reply is received after 3 retries (ivr)" do
@@ -345,7 +347,8 @@ defmodule Ask.FlowTest do
 
     step = flow |> Flow.step(@ivr_visitor, Flow.Message.no_reply)
 
-    assert {:failed, _, _} = step
+    # assert {:failed, _, _} = step
+    assert {:no_retries_left, _, _} = step
   end
 
   test "retry question without the error message when no reply is received" do
@@ -439,7 +442,7 @@ defmodule Ask.FlowTest do
       |> Flow.step(@sms_visitor)
     result = flow |> Flow.step(@sms_visitor, Flow.Message.reply("skip"))
 
-    assert {:end, _, _} = result
+    assert {:end, _, %{stores: %{"Perfect Number" => "REFUSED"}}} = result
   end
 
   test "refusal is stronger than response" do
@@ -477,7 +480,7 @@ defmodule Ask.FlowTest do
     result = flow |> Flow.step(@sms_visitor, Flow.Message.reply("1"))
 
     # No stores (because of refusal)
-    assert {:end, _, %Reply{stores: []}} = result
+    assert {:end, _, %{stores: %{"Perfect Number" => "REFUSED"}}} = result
   end
 
   describe "numeric steps" do

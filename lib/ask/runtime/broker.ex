@@ -4,12 +4,11 @@ defmodule Ask.Runtime.Broker do
   import Ecto.Query
   import Ecto
   alias Ask.{Repo, Survey, Respondent, RespondentDispositionHistory, RespondentGroup, QuotaBucket, Logger}
-  alias Ask.Runtime.{Session, Reply, Flow, SessionMode}
+  alias Ask.Runtime.{Session, Reply, Flow, SessionMode, SessionModeProvider}
   alias Ask.QuotaBucket
 
   @poll_interval :timer.minutes(1)
   @server_ref {:global, __MODULE__}
-  @batch_limit 100
 
   def server_ref, do: @server_ref
 
@@ -25,14 +24,15 @@ defmodule Ask.Runtime.Broker do
 
   def init(_args) do
     :timer.send_after(1000, :poll)
+    Logger.info "Broker started. Default batch size=#{default_batch_size}. Limit per minute=#{batch_limit_per_minute}."
     {:ok, nil}
   end
 
-  def handle_info(:poll, state, now \\ Timex.now) do
+  def handle_info(:poll, state, now) do
     try do
       mark_stalled_for_eight_hours_respondents_as_failed()
 
-      Repo.all(from r in Respondent, where: r.state == "active" and r.timeout_at <= ^now, limit: @batch_limit)
+      Repo.all(from r in Respondent, where: r.state == "active" and r.timeout_at <= ^now, limit: ^batch_limit_per_minute)
       |> Enum.each(&retry_respondent(&1))
 
       all_running_surveys
@@ -43,6 +43,14 @@ defmodule Ask.Runtime.Broker do
     after
       :timer.send_after(@poll_interval, :poll)
     end
+  end
+
+  def handle_info(:poll, state) do
+    handle_info(:poll, state, Timex.now)
+  end
+
+  def handle_info(_, state) do
+    {:noreply, state}
   end
 
   def handle_call(:poll, _from, state) do
@@ -149,6 +157,11 @@ defmodule Ask.Runtime.Broker do
       end
     rescue
       e ->
+        if Mix.env == :test do
+          IO.inspect e
+          IO.inspect System.stacktrace()
+          raise e
+        end
         Logger.error "Error occurred while polling survey (id: #{survey.id}): #{inspect e} #{inspect System.stacktrace}"
         Sentry.capture_exception(e, [
           stacktrace: System.stacktrace(),
@@ -179,7 +192,7 @@ defmodule Ask.Runtime.Broker do
   end
 
   defp start_some(survey, count) do
-    count = Enum.min([@batch_limit, count])
+    count = Enum.min([batch_limit_per_minute, count])
 
     (from r in assoc(survey, :respondents),
       where: r.state == "pending",
@@ -257,7 +270,7 @@ defmodule Ask.Runtime.Broker do
     {candidates, _} = comparisons
     |> Enum.map_reduce(0, fn (comparison, total_count) ->
       ratio = comparison["ratio"]
-      total_count = total_count + ratio
+      total_count = total_count + (ratio || 0)
       included = total_count >= rand
       {{comparison, included}, total_count}
     end)
@@ -278,31 +291,29 @@ defmodule Ask.Runtime.Broker do
     end
   end
 
-  def sync_step(respondent, reply) do
-    session = respondent.session |> Session.load
-    sync_step_internal(session, reply, session.current_mode)
-  end
-
-  def sync_step(respondent, reply, mode) do
+  def sync_step(respondent, reply, mode \\ nil) do
     session = respondent.session |> Session.load
     session_mode = session_mode(respondent, session, mode)
     sync_step_internal(session, reply, session_mode)
   end
 
-  defp session_mode(_respondent, session, :nil) do
+  defp session_mode(_respondent, session, nil) do
     session.current_mode
   end
 
   defp session_mode(respondent, session, mode) do
-    if mode == Ask.Runtime.SessionMode.mode(session.current_mode) do
+    if mode == session.current_mode |> SessionMode.mode do
       session.current_mode
     else
-      # We need to find which channel has this mode
       group = (respondent |> Repo.preload(:respondent_group)).respondent_group
-      channel = (group |> Repo.preload(:channels)).channels
-      |> Enum.find(fn c -> c.type == mode end)
+      channel_group = (group |> Repo.preload([respondent_group_channels: :channel])).respondent_group_channels
+      |> Enum.find(fn c -> c.mode == mode end)
 
-      Ask.Runtime.SessionModeProvider.new(mode, channel, [])
+      if channel_group do
+        SessionModeProvider.new(mode, channel_group.channel, [])
+      else
+        :invalid_mode
+      end
     end
   end
 
@@ -313,7 +324,11 @@ defmodule Ask.Runtime.Broker do
     sync_step_internal(session, reply, session.current_mode)
   end
 
-  defp sync_step_internal(session, reply, session_mode) do
+  def sync_step_internal(_, _, :invalid_mode) do
+    :end
+  end
+
+  def sync_step_internal(session, reply, session_mode) do
     transaction_result = Repo.transaction(fn ->
       try do
         session = cond do
@@ -331,6 +346,13 @@ defmodule Ask.Runtime.Broker do
         e in Ecto.StaleEntryError ->
           Repo.rollback(e)
         e ->
+          # If we uncomment this a test will fail (the one that cheks that nothing breaks),
+          # but this could help you find a bug in a particular test that is not working.
+          # if Mix.env == :test do
+          #   IO.inspect e
+          #   IO.inspect System.stacktrace()
+          #   raise e
+          # end
           respondent = Repo.get(Respondent, session.respondent.id)
           Logger.error "Error occurred while processing sync step (survey_id: #{respondent.survey_id}, respondent_id: #{respondent.id}): #{inspect e} #{inspect System.stacktrace}"
           Sentry.capture_exception(e, [
@@ -340,7 +362,12 @@ defmodule Ask.Runtime.Broker do
           try do
             handle_session_step({:failed, respondent})
           rescue
-            _ ->
+            e ->
+              if Mix.env == :test do
+                IO.inspect e
+                IO.inspect System.stacktrace()
+                raise e
+              end
               :end
           end
       end
@@ -352,7 +379,7 @@ defmodule Ask.Runtime.Broker do
       {:error, %Ecto.StaleEntryError{}} ->
         respondent = Repo.get(Respondent, session.respondent.id)
         # Maybe timeout or another action was executed while sync_step was executed, so we need to retry
-        sync_step(respondent, reply)
+        sync_step(respondent, reply, session_mode)
       value ->
         value
     end
@@ -361,6 +388,11 @@ defmodule Ask.Runtime.Broker do
   defp handle_session_step({:ok, session, reply, timeout, respondent}) do
     update_respondent(respondent, {:ok, session, timeout}, Reply.disposition(reply))
     {:reply, reply}
+  end
+
+  defp handle_session_step({:hangup, session, reply, timeout, respondent}) do
+    update_respondent(respondent, {:ok, session, timeout}, Reply.disposition(reply))
+    :end
   end
 
   defp handle_session_step({:end, reply, respondent}) do
@@ -425,12 +457,15 @@ defmodule Ask.Runtime.Broker do
   end
 
   defp update_respondent(respondent, :rejected) do
-    session = respondent.session |> Session.load
-    update_respondent_and_set_disposition(respondent, session, nil, nil, nil, "rejected", "rejected")
+    respondent
+    |> Respondent.changeset(%{state: "rejected", session: nil, timeout_at: nil})
+    |> Repo.update!
   end
 
   defp update_respondent(respondent, {:rejected, session, timeout}) do
-    update_respondent_and_set_disposition(respondent, session, Session.dump(session), timeout, next_timeout(respondent, timeout), "rejected", "rejected")
+    respondent
+      |> Respondent.changeset(%{state: "rejected", session: Session.dump(session), timeout_at: next_timeout(respondent, timeout)})
+      |> Repo.update!
   end
 
   defp update_respondent(respondent, :failed) do
@@ -491,7 +526,7 @@ defmodule Ask.Runtime.Broker do
     |> update_quota_bucket(old_disposition, respondent.session["count_partial_results"])
   end
 
-  defp update_respondent_disposition(session, disposition) do
+  def update_respondent_disposition(session, disposition) do
     respondent = session.respondent
     old_disposition = respondent.disposition
     if Flow.should_update_disposition(old_disposition, disposition) do
@@ -552,13 +587,13 @@ defmodule Ask.Runtime.Broker do
     respondent
   end
 
-  defp should_update_quota_bucket(new_disposition, old_disposition, false) do
-    new_disposition != old_disposition && new_disposition == "completed"
-  end
-
   defp should_update_quota_bucket(new_disposition, old_disposition, true) do
     (new_disposition != old_disposition && new_disposition == "partial")
     || (new_disposition == "completed" && old_disposition != "partial" && old_disposition != "completed")
+  end
+
+  defp should_update_quota_bucket(new_disposition, old_disposition, _) do
+    new_disposition != old_disposition && new_disposition == "completed"
   end
 
   defp time_to_schedule(now) do
@@ -579,7 +614,7 @@ defmodule Ask.Runtime.Broker do
   defp batch_size(survey, respondents_by_state) do
     case completed_respondents_needed_by(survey) do
       :all ->
-        Survey.environment_variable_named(:batch_size)
+        default_batch_size
 
       respondents_target when is_integer(respondents_target) ->
         successful = successful_respondents(survey, respondents_by_state)
@@ -587,6 +622,14 @@ defmodule Ask.Runtime.Broker do
         (respondents_target - successful) / estimated_success_rate
         |> trunc
     end
+  end
+
+  defp default_batch_size do
+    Survey.environment_variable_named(:batch_size)
+  end
+
+  defp batch_limit_per_minute do
+    Survey.environment_variable_named(:batch_limit_per_minute)
   end
 
   defp estimated_success_rate(successful, respondents_by_state, respondents_target) do
@@ -611,7 +654,7 @@ defmodule Ask.Runtime.Broker do
   defp successful_respondents(survey, respondents_by_state) do
     quota_completed = Repo.one(
       from q in (survey |> assoc(:quota_buckets)),
-      select: sum(q.count)
+      select: fragment("sum(least(count, quota))")
     )
 
     case quota_completed do

@@ -174,9 +174,40 @@ defmodule Ask.BrokerTest do
         }))
     group = insert(:respondent_group, survey: survey, respondents_count: 1) |> Repo.preload(:channels)
 
-    sms_channel_changeset = Ecto.Changeset.change(sms_channel)
-    ivr_channel_changeset = Ecto.Changeset.change(ivr_channel)
-    group = group |> Ecto.Changeset.change |> Ecto.Changeset.put_assoc(:channels, [sms_channel_changeset, ivr_channel_changeset]) |> Repo.update!
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: sms_channel.id, mode: sms_channel.type}) |> Repo.insert
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: ivr_channel.id, mode: ivr_channel.type}) |> Repo.insert
+
+    respondent = insert(:respondent, survey: survey, respondent_group: group)
+
+    Broker.handle_info(:poll, nil)
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert respondent.mode == ["ivr"]
+    assert respondent.questionnaire_id == quiz1.id
+  end
+
+  test "doesn't break with nil as comparison ratio" do
+    test_channel = TestChannel.new
+    sms_channel = insert(:channel, settings: test_channel |> TestChannel.settings, type: "sms")
+    ivr_channel = insert(:channel, settings: test_channel |> TestChannel.settings, type: "ivr")
+
+    quiz1 = insert(:questionnaire, steps: @dummy_steps)
+    quiz2 = insert(:questionnaire, steps: @dummy_steps)
+    survey = insert(:survey, Map.merge(@always_schedule, %{
+        state: "running",
+        questionnaires: [quiz1, quiz2],
+        mode: [["sms"], ["ivr"]],
+        comparisons: [
+          %{"mode" => ["sms"], "questionnaire_id" => quiz1.id, "ratio" => nil},
+          %{"mode" => ["sms"], "questionnaire_id" => quiz2.id, "ratio" => nil},
+          %{"mode" => ["ivr"], "questionnaire_id" => quiz1.id, "ratio" => 100},
+          %{"mode" => ["ivr"], "questionnaire_id" => quiz2.id, "ratio" => nil},
+        ]
+        }))
+    group = insert(:respondent_group, survey: survey, respondents_count: 1) |> Repo.preload(:channels)
+
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: sms_channel.id, mode: sms_channel.type}) |> Repo.insert
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: ivr_channel.id, mode: ivr_channel.type}) |> Repo.insert
 
     respondent = insert(:respondent, survey: survey, respondent_group: group)
 
@@ -710,6 +741,90 @@ defmodule Ask.BrokerTest do
     respondent = Repo.get(Respondent, respondent.id)
     assert respondent.state == "failed"
     assert respondent.disposition == "failed"
+
+    :ok = broker |> GenServer.stop
+  end
+
+  test "when the respondent does not reply anything 3 times, but there are retries left the state stays as active" do
+    [survey, _, _, respondent, _] = create_running_survey_with_channel_and_respondent(@dummy_steps, "ivr")
+    survey |> Survey.changeset(%{ivr_retry_configuration: "10m"}) |> Repo.update
+    right_first_answer = "8"
+
+    {:ok, broker} = Broker.start_link
+    Broker.poll
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.answer())
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.reply(right_first_answer))
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.no_reply)
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.no_reply)
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    assert respondent.state       == "active"
+    assert respondent.disposition == "started"
+
+    Broker.sync_step(respondent, Flow.Message.no_reply)
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    assert respondent.state       == "active"
+    assert respondent.disposition == "started"
+
+    now = Timex.now
+    interval = Interval.new(from: Timex.shift(now, minutes: 9), until: Timex.shift(now, minutes: 11), step: [seconds: 1])
+    assert respondent.timeout_at in interval
+
+    :ok = broker |> GenServer.stop
+  end
+
+  test "when the respondent does not reply anything 3 times or gives an incorrect answer, but there are retries left the state stays as active" do
+    [survey, _, _, respondent, _] = create_running_survey_with_channel_and_respondent(@dummy_steps, "ivr")
+    survey |> Survey.changeset(%{ivr_retry_configuration: "10m"}) |> Repo.update
+    right_first_answer = "8"
+    wrong_second_answer = "16"
+
+    {:ok, broker} = Broker.start_link
+    Broker.poll
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.answer())
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.reply(right_first_answer))
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.no_reply)
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.reply(wrong_second_answer))
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    Broker.sync_step(respondent, Flow.Message.no_reply)
+
+    respondent = Repo.get(Respondent, respondent.id)
+
+    assert respondent.state       == "active"
+    assert respondent.disposition == "started"
+
+    now = Timex.now
+    interval = Interval.new(from: Timex.shift(now, minutes: 9), until: Timex.shift(now, minutes: 11), step: [seconds: 1])
+    assert respondent.timeout_at in interval
 
     :ok = broker |> GenServer.stop
   end
@@ -1503,6 +1618,17 @@ defmodule Ask.BrokerTest do
     assert_respondents_by_state(survey, 1, 9)
   end
 
+  test "continue polling respondents when one of the quotas was exceeded " do
+    [survey, group, _, _, _] = create_running_survey_with_channel_and_respondent()
+    create_several_respondents(survey, group, 10)
+    survey |> Survey.changeset(%{quota_vars: ["gender"]}) |> Repo.update
+    insert(:quota_bucket, survey: survey, condition: %{gender: "male"}, quota: 1, count: 2)
+    insert(:quota_bucket, survey: survey, condition: %{gender: "female"}, quota: 1, count: 0)
+
+    Broker.handle_info(:poll, nil)
+    assert_respondents_by_state(survey, 1, 10)
+  end
+
   test "changes running survey state to 'completed' when there are no more running respondents" do
     [survey, _, _, respondent, _] = create_running_survey_with_channel_and_respondent()
 
@@ -1721,11 +1847,11 @@ defmodule Ask.BrokerTest do
 
     respondent = Repo.get(Respondent, respondent.id)
     reply = Broker.sync_step(respondent, Flow.Message.reply(""))
-    assert {:reply, ReplyHelper.simple("Do you smoke?", "Do you smoke? Reply 1 for YES, 2 for NO")} = reply
+    assert {:reply, ReplyHelper.simple("Do you smoke?", "Do you smoke?")} = reply
 
     respondent = Repo.get(Respondent, respondent.id)
     reply = Broker.sync_step(respondent, Flow.Message.reply("Yes"))
-    assert {:reply, ReplyHelper.simple("Do you exercise", "Do you exercise? Reply 1 for YES, 2 for NO")} = reply
+    assert {:reply, ReplyHelper.simple("Do you exercise", "Do you exercise?")} = reply
 
     respondent = Repo.get(Respondent, respondent.id)
     reply = Broker.sync_step(respondent, Flow.Message.reply("Yes"))
@@ -2554,7 +2680,7 @@ defmodule Ask.BrokerTest do
     # Respondent says 1 (i.e.: Yes), causing an invalid skip_logic to be inspected
     Broker.sync_step(respondent, Flow.Message.reply("1"))
 
-    # If there's a probelm with one respondent, continue the survey with others
+    # If there's a problem with one respondent, continue the survey with others
     # and mark this one as failed
     survey = Repo.get(Survey, survey.id)
     assert survey.state == "running"
@@ -2586,20 +2712,73 @@ defmodule Ask.BrokerTest do
     assert updated_respondent.timeout_at in interval
   end
 
-  test "marks as failed after 3 successive wrong replies" do
-    [_, _, _, respondent, _] = create_running_survey_with_channel_and_respondent()
+  test "marks as failed after 3 successive wrong replies if there are no more retries" do
+    [survey, _, _, respondent, _] = create_running_survey_with_channel_and_respondent(@dummy_steps, "ivr")
 
-    {:ok, _} = Broker.start_link
-    Broker.handle_info(:poll, nil)
+    {:ok, broker} = Broker.start_link
+    Broker.poll
 
-    (1..3) |> Enum.each(fn _ ->
-      respondent = Repo.get(Respondent, respondent.id)
-      Broker.sync_step(respondent, Flow.Message.reply("Oops"))
-    end)
+    survey = Repo.get(Survey, survey.id)
+    assert survey.state == "running"
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert respondent.state == "active"
+
+    reply = Broker.sync_step(respondent, Flow.Message.answer())
+    assert {:reply, ReplyHelper.ivr("Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert {:reply, ReplyHelper.error_ivr("You have entered an invalid answer (ivr)", "Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert {:reply, ReplyHelper.error_ivr("You have entered an invalid answer (ivr)", "Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert :end = reply
 
     respondent = Repo.get(Respondent, respondent.id)
     assert respondent.state == "failed"
     assert respondent.disposition == "breakoff"
+
+    :ok = broker |> GenServer.stop
+  end
+
+  test "does not mark as failed after 3 successive wrong replies when there are retries left" do
+    [survey, _, _, respondent, _] = create_running_survey_with_channel_and_respondent(@dummy_steps, "ivr")
+    survey |> Survey.changeset(%{ivr_retry_configuration: "10m"}) |> Repo.update!
+
+    {:ok, broker} = Broker.start_link
+    Broker.poll
+
+    survey = Repo.get(Survey, survey.id)
+    assert survey.state == "running"
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert respondent.state == "active"
+
+    reply = Broker.sync_step(respondent, Flow.Message.answer())
+    assert {:reply, ReplyHelper.ivr("Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert {:reply, ReplyHelper.error_ivr("You have entered an invalid answer (ivr)", "Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert {:reply, ReplyHelper.error_ivr("You have entered an invalid answer (ivr)", "Do you smoke?", "Do you smoke? Press 8 for YES, 9 for NO")} = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("3"))
+    assert :end = reply
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert respondent.state == "active"
+    assert respondent.disposition == "started"
+
+    :ok = broker |> GenServer.stop
   end
 
   test "reply via another channel (sms when ivr is the current one)" do
@@ -2624,6 +2803,52 @@ defmodule Ask.BrokerTest do
     respondent = Repo.get(Respondent, respondent.id)
     reply = Broker.sync_step(respondent, Flow.Message.reply("Yes"), "sms")
     assert {:reply, ReplyHelper.simple("Do you exercise", "Do you exercise? Reply 1 for YES, 2 for NO")} = reply
+  end
+
+  test "reply via another channel (mobileweb when sms is the current one)" do
+    sms_test_channel = TestChannel.new(false, true)
+    sms_channel = insert(:channel, settings: sms_test_channel |> TestChannel.settings, type: "mobileweb")
+
+    ivr_test_channel = TestChannel.new(false, false)
+    ivr_channel = insert(:channel, settings: ivr_test_channel |> TestChannel.settings, type: "sms")
+
+    quiz = insert(:questionnaire, steps: @mobileweb_dummy_steps)
+    survey = insert(:survey, Map.merge(@always_schedule, %{state: "running", questionnaires: [quiz], mode: [["sms", "mobileweb"]]}))
+    group = insert(:respondent_group, survey: survey, respondents_count: 1) |> Repo.preload(:channels)
+
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: sms_channel.id, mode: "mobileweb"}) |> Repo.insert
+    RespondentGroupChannel.changeset(%RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: ivr_channel.id, mode: "sms"}) |> Repo.insert
+
+    respondent = insert(:respondent, survey: survey, respondent_group: group)
+
+    {:ok, _} = Broker.start_link
+    Broker.handle_info(:poll, nil)
+
+    respondent = Repo.get(Respondent, respondent.id)
+    reply = Broker.sync_step(respondent, Flow.Message.reply("Yes"), "mobileweb")
+    assert {:reply, ReplyHelper.simple("Do you exercise", "Do you exercise?")} = reply
+  end
+
+  test "ignore answers from sms when mode is not one of the survey modes" do
+    [survey, _group, test_channel, respondent, phone_number] = create_running_survey_with_channel_and_respondent(@mobileweb_dummy_steps, "mobileweb")
+    survey |> Survey.changeset(%{mobileweb_retry_configuration: "10m"}) |> Repo.update
+
+    {:ok, broker} = Broker.start_link
+    Broker.poll
+
+    assert_receive [:ask, ^test_channel, %Respondent{sanitized_phone_number: ^phone_number}, _, ReplyHelper.simple("Contact", message)]
+    assert message == "Please enter http://app.ask.dev/mobile_survey/#{respondent.id}?token=#{Respondent.token(respondent.id)}"
+
+    survey = Repo.get(Survey, survey.id)
+    assert survey.state == "running"
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert respondent.state == "active"
+
+    respondent = Repo.get(Respondent, respondent.id)
+    assert :end = Broker.sync_step(respondent, Flow.Message.reply("Yes"), "sms")
+
+    :ok = broker |> GenServer.stop
   end
 
   test "it doesn't crash on channel_failed when there's no session" do

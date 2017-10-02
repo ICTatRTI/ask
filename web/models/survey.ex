@@ -13,7 +13,6 @@ defmodule Ask.Survey do
     field :exit_message, :string
     field :cutoff, :integer
     field :count_partial_results, :boolean, default: false
-    field :respondents_count, :integer, virtual: true
     field :schedule_day_of_week, Ask.DayOfWeek, default: Ask.DayOfWeek.never
     field :schedule_start_time, Ecto.Time
     field :schedule_end_time, Ecto.Time
@@ -43,7 +42,7 @@ defmodule Ask.Survey do
   """
   def changeset(struct, params \\ %{}) do
     struct
-    |> cast(params, [:name, :project_id, :mode, :state, :exit_code, :exit_message, :cutoff, :respondents_count, :schedule_day_of_week, :schedule_start_time, :schedule_end_time, :timezone, :sms_retry_configuration, :ivr_retry_configuration, :mobileweb_retry_configuration, :fallback_delay, :started_at, :quotas, :quota_vars, :comparisons, :count_partial_results, :simulation])
+    |> cast(params, [:name, :project_id, :mode, :state, :exit_code, :exit_message, :cutoff, :schedule_day_of_week, :schedule_start_time, :schedule_end_time, :timezone, :sms_retry_configuration, :ivr_retry_configuration, :mobileweb_retry_configuration, :fallback_delay, :started_at, :quotas, :quota_vars, :comparisons, :count_partial_results, :simulation])
     |> validate_required([:project_id, :state, :schedule_start_time, :schedule_end_time, :timezone])
     |> foreign_key_constraint(:project_id)
     |> validate_from_less_than_to
@@ -328,6 +327,34 @@ defmodule Ask.Survey do
   def adjust_timezone(date = %Ecto.DateTime{}, survey) do
     date
     |> Ecto.DateTime.to_erl
+    adjust_timezone_to_survey(date, survey)
+  end
+
+  def adjust_timezone(date = %NaiveDateTime{}, survey) do
+    # Ecto.DateTime.utc
+    # |> Ecto.DateTime.to_erl
+    # |> NaiveDateTime.from_erl!
+    # |> DateTime.from_naive!("Etc/UTC")
+
+    # DateTime.utc_now
+    # |> DateTime.to_naive
+    # |> NaiveDateTime.to_erl
+    # |> Ecto.DateTime.from_erl
+
+    date
+    |> NaiveDateTime.to_erl
+    adjust_timezone_to_survey(date, survey)
+  end
+
+  def adjust_timezone(date = %DateTime{}, survey) do
+    date
+    |> DateTime.to_naive
+    |> NaiveDateTime.to_erl
+    adjust_timezone_to_survey(date, survey)
+  end
+
+  defp adjust_timezone_to_survey(date, survey) do
+    date
     |> Timex.Ecto.DateTime.cast!
     |> Timex.Timezone.convert(survey.timezone)
   end

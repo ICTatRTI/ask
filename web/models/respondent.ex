@@ -14,6 +14,8 @@ defmodule Ask.Respondent do
     # * stalled: communication couldn't be established or was cut, only for SMS.
     #            communication might continue if the respondent replies at any time
     # * rejected: communication ended because the respondent fell in a full quota bucket
+    # * cancelled: when the survey is stopped and has "terminated" state, all the active
+    #              or stalled respondents will be updated with this state.
     field :state, :string, default: "pending"
 
     # Valid dispositions are:
@@ -45,8 +47,9 @@ defmodule Ask.Respondent do
     belongs_to :quota_bucket, Ask.QuotaBucket
     has_many :responses, Ask.Response
     has_many :survey_log_entries, Ask.SurveyLogEntry
-
     field :lock_version, :integer, default: 1
+
+    field :experiment_name, :string, virtual: true
 
     timestamps()
   end

@@ -191,10 +191,10 @@ defmodule Ask.RespondentController do
       end
 
     # Completion percentage
-    pending_respondents =
+    contacted_respondents =
       Repo.one(
-        from r in Respondent,
-        where: r.survey_id == ^survey.id and r.state == "pending",
+        from r in (survey |> assoc(:respondents)),
+        where: not r.disposition in ["queued", "registered"],
         select: count("*")
       )
     completed_or_partial =
@@ -212,7 +212,7 @@ defmodule Ask.RespondentController do
       cumulative_percentages: cumulative_percentages(respondents_by_completed_at, survey, target),
       completion_percentage: completion_percentage,
       total_respondents: total_respondents,
-      contacted_respondents: total_respondents - pending_respondents
+      contacted_respondents: contacted_respondents
     }
 
     render(conn, layout, stats: stats)
@@ -387,7 +387,7 @@ defmodule Ask.RespondentController do
     |> Enum.into(%{})
   end
 
-  def csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
+  def results(conn, %{"project_id" => project_id, "survey_id" => survey_id} = params) do
     project = conn
     |> load_project(project_id)
 
@@ -408,12 +408,69 @@ defmodule Ask.RespondentController do
     |> Enum.uniq
     |> Enum.reject(fn s -> String.length(s) == 0 end)
 
-    # Now traverse each respondent and create a row for it
-    csv_rows = from(
-      r in Respondent,
-      where: r.survey_id == ^survey_id,
-      order_by: r.id)
+    dynamic = dynamic([r], r.survey_id == ^survey.id)
+
+    dynamic =
+      if params["since"] do
+        dynamic([r], r.updated_at > ^params["since"] and ^dynamic)
+      else
+        dynamic
+      end
+
+    dynamic =
+      if params["disposition"] do
+        dynamic([r], r.disposition == ^params["disposition"] and ^dynamic)
+      else
+        dynamic
+      end
+
+    dynamic =
+      if params["final"] do
+        dynamic([r], r.state == "completed" and ^dynamic)
+      else
+        dynamic
+      end
+
+    respondents = Respondent
+    |> where(^dynamic)
+    |> order_by(:id)
     |> preload(:responses)
+
+    render_results(conn, get_format(conn), survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents)
+  end
+
+  defp render_results(conn, "json", _survey, _tz_offset, questionnaires, has_comparisons, _all_fields, respondents) do
+    respondents_count = respondents |> Repo.aggregate(:count, :id)
+    respondents = respondents
+    |> Repo.stream
+    respondents = if has_comparisons do
+      respondents
+      |> Stream.map(fn respondent ->
+        experiment_name = if respondent.questionnaire_id && respondent.mode do
+          questionnaire = questionnaires |> Enum.find(fn q -> q.id == respondent.questionnaire_id end)
+          if questionnaire do
+            experiment_name(questionnaire, respondent.mode)
+          else
+            "-"
+          end
+        else
+          "-"
+        end
+        %{respondent | experiment_name: experiment_name}
+      end)
+    else
+      respondents
+    end
+
+    {:ok, conn} = Repo.transaction(fn() ->
+      render(conn, "index.json", respondents: respondents, respondents_count: respondents_count)
+    end)
+    conn
+  end
+
+  defp render_results(conn, "csv", survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents) do
+    # Now traverse each respondent and create a row for it
+    csv_rows = respondents
     |> Repo.stream
     |> Stream.map(fn respondent ->
         row = [respondent.hashed_number]
@@ -499,7 +556,7 @@ defmodule Ask.RespondentController do
     conn |> csv_stream(rows, filename)
   end
 
-  def disposition_history_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
+  def disposition_history(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
     project = conn
     |> load_project(project_id)
 
@@ -529,7 +586,7 @@ defmodule Ask.RespondentController do
     conn |> csv_stream(rows, filename)
   end
 
-  def incentives_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
+  def incentives(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
     project = conn
     |> load_project_for_owner(project_id)
 
@@ -554,7 +611,7 @@ defmodule Ask.RespondentController do
     conn |> csv_stream(rows, filename)
   end
 
-  def interactions_csv(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
+  def interactions(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
     project = conn
     |> load_project_for_owner(project_id)
 
@@ -563,47 +620,30 @@ defmodule Ask.RespondentController do
     |> assoc(:surveys)
     |> Repo.get!(survey_id)
 
-    log_stream = Stream.resource(fn -> {"", 0} end,
-      fn {last_seen_respondent_hashed_number, last_seen_id} ->
-        results =
-          (from e in SurveyLogEntry,
-          where: e.survey_id == ^survey.id and (
-            (e.respondent_hashed_number == ^last_seen_respondent_hashed_number and e.id > ^last_seen_id) or
-            (e.respondent_hashed_number > ^last_seen_respondent_hashed_number)),
-          order_by: [e.respondent_hashed_number, e.id])
-          |> preload(:channel)
-          |> limit(500)
-          |> Repo.all
-
-        case List.last(results) do
-          %{respondent_hashed_number: last_respondent_hashed_number, id: last_id} ->
-            {results, {last_respondent_hashed_number, last_id}}
-          nil ->
-            {:halt, nil}
-        end
-      end,
-      fn _ -> [] end)
-
     tz_offset = Survey.timezone_offset(survey)
 
-    csv_rows = log_stream
-    |> Stream.map(fn e ->
-      channel_name =
-        if e.channel do
-          e.channel.name
-        else
-          ""
-        end
+    csv_rows = (from e in SurveyLogEntry,
+      where: e.survey_id == ^survey.id,
+      order_by: [e.respondent_hashed_number, e.id])
+      |> preload(:channel)
+      |> Repo.stream
+      |> Stream.map(fn e ->
+        channel_name =
+          if e.channel do
+            e.channel.name
+          else
+            ""
+          end
 
-      disposition = disposition_label(e.disposition)
-      action_type = action_type_label(e.action_type)
+        disposition = disposition_label(e.disposition)
+        action_type = action_type_label(e.action_type)
 
-      timestamp = e.timestamp
-      |> Survey.adjust_timezone(survey)
-      |> Timex.format!("%Y-%m-%d %H:%M:%S #{tz_offset}", :strftime)
+        timestamp = e.timestamp
+        |> Survey.adjust_timezone(survey)
+        |> Timex.format!("%Y-%m-%d %H:%M:%S #{tz_offset}", :strftime)
 
-      [e.respondent_hashed_number, interactions_mode_label(e.mode), channel_name, disposition, action_type, e.action_data, timestamp]
-    end)
+        [e.respondent_hashed_number, interactions_mode_label(e.mode), channel_name, disposition, action_type, e.action_data, timestamp]
+      end)
 
     header = ["Respondent ID", "Mode", "Channel", "Disposition", "Action Type", "Action Data", "Timestamp"]
     rows = Stream.concat([[header], csv_rows])

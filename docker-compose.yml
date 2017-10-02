@@ -15,7 +15,7 @@ services:
   ports:
       - 3306:3306
   app:
-    command: elixir --sname server -S mix phoenix.server
+    command: elixir --sname server -S mix phx.server
     build:
       context: ./
       dockerfile: Dockerfile.dev

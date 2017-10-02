@@ -34,6 +34,22 @@ defmodule Ask.Router do
     #plug Guardian.Plug.LoadResource
   end
 
+  pipeline :csv_json_api do
+    plug :accepts, ["json", "csv"]
+    plug :fetch_session
+    plug :fetch_flash
+
+    plug Coherence.Authentication.Session, db_model: Ask.User
+  end
+
+  pipeline :csv_api do
+    plug :accepts, ["csv"]
+    plug :fetch_session
+    plug :fetch_flash
+
+    plug Coherence.Authentication.Session, db_model: Ask.User
+  end
+
   if Mix.env == :dev do
     scope "/dev" do
       pipe_through [:browser]
@@ -62,10 +78,6 @@ defmodule Ask.Router do
             post "/replace", RespondentGroupController, :replace, as: :replace
           end
           get "/respondents/stats", RespondentController, :stats, as: :respondents_stats
-          get "/respondents/csv", RespondentController, :csv, as: :respondents_csv
-          get "/respondents/disposition_history_csv", RespondentController, :disposition_history_csv, as: :respondents_disposition_history_csv
-          get "/respondents/incentives_csv", RespondentController, :incentives_csv, as: :respondents_incentives_csv
-          get "/respondents/interactions_csv", RespondentController, :interactions_csv, as: :respondents_interactions_csv
           get "/simulation_status", SurveyController, :simulation_status
           post "/stop_simulation", SurveyController, :stop_simulation
         end
@@ -96,6 +108,25 @@ defmodule Ask.Router do
     end
   end
 
+  scope "/api" , Ask do
+    scope "/v1" do
+      resources "/projects", ProjectController, only: [] do
+        resources "/surveys", SurveyController, only: [] do
+          scope "/respondents" do
+            pipe_through :csv_json_api
+            get "/results", RespondentController, :results, as: :respondents_results
+          end
+          scope "/respondents" do
+            pipe_through :csv_api
+            get "/disposition_history", RespondentController, :disposition_history, as: :respondents_disposition_history
+            get "/incentives", RespondentController, :incentives, as: :respondents_incentives
+            get "/interactions", RespondentController, :interactions, as: :respondents_interactions
+          end
+        end
+      end
+    end
+  end
+
   get "/audio/:id", Ask.AudioDeliveryController, :show
   get "/callbacks/:provider", Ask.CallbackController, :callback
   post "/callbacks/:provider", Ask.CallbackController, :callback
@@ -108,13 +139,14 @@ defmodule Ask.Router do
 
   scope "/", Ask do
     pipe_through :browser
-    coherence_routes :public
+    coherence_routes :all
 
     # add public resources below
     get "/oauth_client/callback", OAuthClientController, :callback
     get "/registrations/confirmation_sent", Coherence.RegistrationController, :confirmation_sent
     get "/registrations/confirmation_expired", Coherence.RegistrationController, :confirmation_expired
     get "/passwords/password_recovery_sent", Coherence.PasswordController, :password_recovery_sent
+    get "/session/oauth_callback", Coherence.SessionController, :oauth_callback
     get "/*path", PageController, :index
   end
 end

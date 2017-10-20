@@ -41,13 +41,12 @@ defmodule Ask.SurveyController do
     project = conn
     |> load_project_for_change(project_id)
 
+    survey_params = Map.get(params, "survey", %{})
+    timezone = Map.get(survey_params, "timezone", Ask.Schedule.default_timezone())
+    schedule = Map.merge(Ask.Schedule.default(), %{timezone: timezone})
     props = %{"project_id" => project_id,
               "name" => "",
-              "schedule_start_time" => Ecto.Time.cast!("09:00:00"),
-              "schedule_end_time" => Ecto.Time.cast!("18:00:00"),
-              "timezone" => "UTC"}
-    survey_params = Map.get(params, "survey", %{})
-    props = Map.merge(props, survey_params)
+              "schedule" => schedule}
 
     changeset = project
     |> build_assoc(:surveys)
@@ -200,10 +199,7 @@ defmodule Ask.SurveyController do
       mode: [[mode]],
       state: "ready",
       cutoff: 1,
-      schedule_day_of_week: Ask.DayOfWeek.every_day,
-      schedule_start_time: Ecto.Time.cast!("00:00:00"),
-      schedule_end_time: Ecto.Time.cast!("23:59:59"),
-      timezone: "UTC"}
+      schedule: Ask.Schedule.always()}
     |> Ecto.Changeset.change
     |> Repo.insert!
 

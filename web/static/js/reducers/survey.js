@@ -11,6 +11,7 @@ import isEqual from 'lodash/isEqual'
 import uniqWith from 'lodash/uniqWith'
 import every from 'lodash/every'
 import some from 'lodash/some'
+import without from 'lodash/without'
 import React from 'react'
 
 export const dataReducer = (state: Survey, action: any): Survey => {
@@ -24,6 +25,9 @@ export const dataReducer = (state: Survey, action: any): Survey => {
     case actions.TOGGLE_DAY: return toggleDay(state, action)
     case actions.SET_SCHEDULE_TO: return setScheduleTo(state, action)
     case actions.SET_SCHEDULE_FROM: return setScheduleFrom(state, action)
+    case actions.ADD_SCHEDULE_BLOCKED_DAY: return addScheduleBlockedDay(state, action)
+    case actions.REMOVE_SCHEDULE_BLOCKED_DAY: return removeScheduleBlockedDay(state, action)
+    case actions.CLEAR_SCHEDULE_BLOCKED_DAYS: return clearScheduleBlockedDays(state, action)
     case actions.SELECT_MODE: return selectMode(state, action)
     case actions.CHANGE_MODE_COMPARISON: return changeModeComparison(state, action)
     case actions.CHANGE_QUESTIONNAIRE_COMPARISON: return changeQuestionnaireComparison(state, action)
@@ -356,34 +360,76 @@ const questionnairesMatchModes = (modes, ids, questionnaires) => {
 const toggleDay = (state, action) => {
   return {
     ...state,
-    scheduleDayOfWeek: {
-      ...state.scheduleDayOfWeek,
-      [action.day]: !state.scheduleDayOfWeek[action.day]
+    schedule: {
+      ...state.schedule,
+      dayOfWeek: {
+        ...state.schedule.dayOfWeek,
+        [action.day]: !state.schedule.dayOfWeek[action.day]
+      }
     }
   }
 }
 
 const setScheduleFrom = (state, action) => {
-  let endTime = state.scheduleEndTime
+  let endTime = state.schedule.endTime
   if (action.hour >= endTime) {
     endTime = action.nextHour
   }
   return {
     ...state,
-    scheduleEndTime: endTime,
-    scheduleStartTime: action.hour
+    schedule: {
+      ...state.schedule,
+      endTime: endTime,
+      startTime: action.hour
+    }
   }
 }
 
 const setScheduleTo = (state, action) => {
-  let startTime = state.scheduleStartTime
+  let startTime = state.schedule.startTime
   if (action.hour <= startTime) {
     startTime = action.previousHour
   }
   return {
     ...state,
-    scheduleStartTime: startTime,
-    scheduleEndTime: action.hour
+    schedule: {
+      ...state.schedule,
+      startTime: startTime,
+      endTime: action.hour
+    }
+  }
+}
+
+const addScheduleBlockedDay = (state, action) => {
+  return {
+    ...state,
+    schedule: {
+      ...state.schedule,
+      blockedDays: Array.from(new Set([
+        ...state.schedule.blockedDays,
+        action.day
+      ]))
+    }
+  }
+}
+
+const removeScheduleBlockedDay = (state, action) => {
+  return {
+    ...state,
+    schedule: {
+      ...state.schedule,
+      blockedDays: without(state.schedule.blockedDays, action.day)
+    }
+  }
+}
+
+const clearScheduleBlockedDays = (state, action) => {
+  return {
+    ...state,
+    schedule: {
+      ...state.schedule,
+      blockedDays: []
+    }
   }
 }
 
@@ -472,7 +518,10 @@ const buildComparisons = (modeComparison, questionnaireComparison, modes, questi
 const setTimezone = (state, action) => {
   return {
     ...state,
-    timezone: action.timezone
+    schedule: {
+      ...state.schedule,
+      timezone: action.timezone
+    }
   }
 }
 

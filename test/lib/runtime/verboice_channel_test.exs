@@ -26,13 +26,13 @@ defmodule Ask.Runtime.VerboiceChannelTest do
       twiml_map: [
         {Flow.Message.answer, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.tts_prompt("Do you exercise?"))}, "<Say>Do you exercise?</Say>"},
         {Flow.Message.reply("8"), {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.tts_prompt("Do you exercise?"))}, "<Say>Do you exercise?</Say>"},
-        {Flow.Message.answer, {:reply, ReplyHelper.multiple([{"Hello!", Ask.StepBuilder.tts_prompt("Hello!")}, {"Do you exercise", Ask.StepBuilder.tts_prompt("Do you exercise?")}])}, "<Response><Say>Hello!</Say><Gather action=\"http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\"><Say>Do you exercise?</Say></Gather><Redirect>http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
-        {Flow.Message.answer, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Response><Gather action=\"http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\"><Play>http://app.ask.dev/audio/foo</Play></Gather><Redirect>http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
-        {Flow.Message.answer, {:reply, ReplyHelper.simple_with_num_digits("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"), 3)}, "<Response><Gather action=\"http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\" numDigits=\"3\"><Play>http://app.ask.dev/audio/foo</Play></Gather><Redirect>http://app.ask.dev/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
+        {Flow.Message.answer, {:reply, ReplyHelper.multiple([{"Hello!", Ask.StepBuilder.tts_prompt("Hello!")}, {"Do you exercise", Ask.StepBuilder.tts_prompt("Do you exercise?")}])}, "<Response><Say>Hello!</Say><Gather action=\"#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\"><Say>Do you exercise?</Say></Gather><Redirect>#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
+        {Flow.Message.answer, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Response><Gather action=\"#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\"><Play>#{Ask.Endpoint.url}/audio/foo</Play></Gather><Redirect>#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
+        {Flow.Message.answer, {:reply, ReplyHelper.simple_with_num_digits("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"), 3)}, "<Response><Gather action=\"#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}\" finishOnKey=\"\" numDigits=\"3\"><Play>#{Ask.Endpoint.url}/audio/foo</Play></Gather><Redirect>#{Ask.Endpoint.url}/callbacks/verboice?respondent=#{respondent.id}&amp;Digits=timeout</Redirect></Response>"},
         {Flow.Message.answer, :end, "<Response><Hangup/></Response>"},
         {Flow.Message.answer, {:end, {:reply, ReplyHelper.quota_completed(Ask.StepBuilder.tts_prompt("Bye!"))}}, "<Response><Say>Bye!</Say><Hangup/></Response>"},
-        {Flow.Message.answer, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Play>http://app.ask.dev/audio/foo</Play>"},
-        {Flow.Message.reply("8"), {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Play>http://app.ask.dev/audio/foo</Play>"},
+        {Flow.Message.answer, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Play>#{Ask.Endpoint.url}/audio/foo</Play>"},
+        {Flow.Message.reply("8"), {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.audio_prompt(uuid: "foo", text: "Do you exercise?"))}, "<Play>#{Ask.Endpoint.url}/audio/foo</Play>"},
       ]
     }
   end
@@ -67,22 +67,85 @@ defmodule Ask.Runtime.VerboiceChannelTest do
     assert response(conn, 200) |> trim_xml == "<Response><Hangup/></Response>"
   end
 
+  test "total call time", %{respondent: respondent, conn: conn} do
+    respondent_id = respondent.id
+
+    answer = Flow.Message.answer
+    GenServer.cast(BrokerStub.server_ref, {:expects, fn
+      {:sync_step, %Respondent{id: ^respondent_id}, ^answer, "ivr"} ->
+        {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.tts_prompt("Do you exercise?"))}
+    end})
+
+    VerboiceChannel.callback(conn, %{"respondent" => respondent_id, "Digits" => nil}, BrokerStub)
+
+    now = DateTime.utc_now
+    interval = Interval.new(from: Timex.shift(now, seconds: -2), until: Timex.shift(now, seconds: 2), step: [seconds: 1])
+    first_interaction_time = Repo.get(Respondent, respondent_id).stats.current_call_first_interaction_time
+    assert first_interaction_time in interval
+
+    digits = Flow.Message.reply("9")
+    GenServer.cast(BrokerStub.server_ref, {:expects, fn
+      {:sync_step, %Respondent{id: ^respondent_id}, ^digits, "ivr"} ->
+        {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.tts_prompt("Do you smoke?"))}
+    end})
+
+    VerboiceChannel.callback(conn, %{"respondent" => respondent_id, "Digits" => "9"}, BrokerStub)
+
+    now = DateTime.utc_now
+    interval = Interval.new(from: Timex.shift(now, seconds: -2), until: Timex.shift(now, seconds: 2), step: [seconds: 1])
+    last_interaction_time = Repo.get(Respondent, respondent_id).stats.current_call_last_interaction_time
+    assert last_interaction_time in interval
+
+    # change the first interaction time to pretend the call was longer than the test duration
+    respondent = Repo.get!(Respondent, respondent_id)
+    Respondent.changeset(respondent, %{stats: %{respondent.stats | current_call_first_interaction_time: Timex.now |> Timex.shift(minutes: -10)}}) |> Repo.update
+
+    no_reply = Flow.Message.no_reply
+    GenServer.cast(BrokerStub.server_ref, {:expects, fn
+      {:sync_step, %Respondent{id: ^respondent_id}, ^no_reply, "ivr"} ->
+        {:end, {:reply, ReplyHelper.simple("Step", Ask.StepBuilder.tts_prompt("Bye"))}}
+    end})
+
+    VerboiceChannel.callback(conn, %{"respondent" => respondent_id, "Digits" => "timeout"}, BrokerStub)
+
+    respondent = Repo.get(Respondent, respondent_id)
+    assert respondent.stats.current_call_first_interaction_time == nil
+    assert respondent.stats.current_call_last_interaction_time == nil
+    assert respondent.stats.total_call_time == 10
+  end
+
+  @channel_foo %{"id" => 1, "name" => "foo"}
+  @channel_bar %{"id" => 2, "name" => "bar"}
+  @channel_baz %{"id" => 3, "name" => "baz", "shared_by" => "other@user.com"}
+
   describe "channel sync" do
     test "create channels" do
       user = insert(:user)
       user_id = user.id
-      VerboiceChannel.sync_channels(user.id, "http://test.com", ["foo", "bar"])
-      channels = user |> assoc(:channels) |> where([c], c.provider == "verboice" and c.base_url == "http://test.com") |> Repo.all
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_foo, @channel_bar])
+      channels = Ask.Channel |> order_by([c], c.name) |> Repo.all
       assert [
-        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo"}},
-        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "bar", settings: %{"verboice_channel" => "bar"}}
+        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "bar", settings: %{"verboice_channel" => "bar", "verboice_channel_id" => 2}},
+        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1}}
+      ] = channels
+    end
+
+    test "create shared channel" do
+      user = insert(:user)
+      user_id = user.id
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_foo, @channel_bar, @channel_baz])
+      channels = Ask.Channel |> order_by([c], c.name) |> Repo.all
+      assert [
+        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "bar", settings: %{"verboice_channel" => "bar", "verboice_channel_id" => 2}},
+        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "baz", settings: %{"verboice_channel" => "baz", "verboice_channel_id" => 3, "shared_by" => "other@user.com"}},
+        %Ask.Channel{user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1}}
       ] = channels
     end
 
     test "delete channels" do
       user = insert(:user)
-      channel = insert(:channel, user: user, provider: "verboice", base_url: "http://test.com", name: "foo", settings: %{"verboice_channel" => "foo"})
-      VerboiceChannel.sync_channels(user.id, "http://test.com", ["bar"])
+      channel = insert(:channel, user: user, provider: "verboice", base_url: "http://test.com", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1})
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_bar])
       refute Ask.Channel |> Repo.get(channel.id)
     end
 
@@ -93,13 +156,40 @@ defmodule Ask.Runtime.VerboiceChannelTest do
       assert Ask.Channel |> Repo.get(channel.id)
     end
 
-    test "leave existing channels untouched" do
+    test "update existing channels" do
       user = insert(:user)
-      channel = insert(:channel, user: user, provider: "verboice", base_url: "http://test.com", name: "FOO", settings: %{"verboice_channel" => "foo"})
-      channel = Ask.Channel |> Repo.get(channel.id)
-      VerboiceChannel.sync_channels(user.id, "http://test.com", ["foo"])
-      channels = user |> assoc(:channels) |> where([c], c.provider == "verboice") |> Repo.all
-      assert [^channel] = channels
+      user_id = user.id
+      channel = insert(:channel, user: user, provider: "verboice", base_url: "http://test.com", name: "FOO", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1})
+      channel_id = channel.id
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_foo])
+      channels = Ask.Channel |> Repo.all
+      assert [
+        %Ask.Channel{id: ^channel_id, user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1}}
+      ] = channels
+    end
+
+    test "migrate existing channels adding the verboice channel id" do
+      user = insert(:user)
+      user_id = user.id
+      channel = insert(:channel, user: user, provider: "verboice", type: "ivr", base_url: "http://test.com", name: "foo", settings: %{"verboice_channel" => "foo"})
+      channel_id = channel.id
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_foo])
+      channels = Ask.Channel |> Repo.all
+      assert [
+        %Ask.Channel{id: ^channel_id, user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1}}
+      ] = channels
+    end
+
+    test "match existing channels by id" do
+      user = insert(:user)
+      user_id = user.id
+      channel = insert(:channel, user: user, provider: "verboice", type: "ivr", base_url: "http://test.com", name: "fooooo", settings: %{"verboice_channel" => "fooooo", "verboice_channel_id" => 1})
+      channel_id = channel.id
+      VerboiceChannel.sync_channels(user.id, "http://test.com", [@channel_foo])
+      channels = Ask.Channel |> Repo.all
+      assert [
+        %Ask.Channel{id: ^channel_id, user_id: ^user_id, provider: "verboice", base_url: "http://test.com", type: "ivr", name: "foo", settings: %{"verboice_channel" => "foo", "verboice_channel_id" => 1}}
+      ] = channels
     end
   end
 
@@ -347,6 +437,42 @@ defmodule Ask.Runtime.VerboiceChannelTest do
       assert call_failed.action_type == "contact"
 
       :ok = broker |> GenServer.stop
+    end
+
+    test "call expired", %{conn: conn} do
+      test_channel = Ask.TestChannel.new(false, false)
+
+      channel = insert(:channel, settings: test_channel |> Ask.TestChannel.settings, type: "ivr")
+      quiz = insert(:questionnaire, steps: @dummy_steps)
+      survey = insert(:survey, Map.merge(@survey, %{state: "running", questionnaires: [quiz], mode: [["ivr"]]}))
+      group = insert(:respondent_group, survey: survey, respondents_count: 1) |> Repo.preload(:channels)
+
+      Ask.RespondentGroupChannel.changeset(%Ask.RespondentGroupChannel{}, %{respondent_group_id: group.id, channel_id: channel.id, mode: "ivr"}) |> Repo.insert
+
+      respondent = insert(:respondent, survey: survey, respondent_group: group)
+
+      {:ok, logger} = SurveyLogger.start_link
+      Broker.handle_info(:poll, nil, Timex.now)
+
+      survey = Repo.get(Survey, survey.id)
+      assert survey.state == "running"
+
+      respondent = Repo.get(Respondent, respondent.id)
+      assert respondent.state == "active"
+
+      VerboiceChannel.callback(conn, %{"path" => ["status", respondent.id, "token"], "CallStatus" => "expired"})
+
+      :ok = logger |> GenServer.stop
+
+      assert [enqueueing, timeout] = (respondent |> Repo.preload(:survey_log_entries)).survey_log_entries
+
+      assert enqueueing.survey_id == survey.id
+      assert enqueueing.action_data == "Enqueueing call"
+      assert enqueueing.action_type == "contact"
+
+      assert timeout.survey_id == survey.id
+      assert timeout.action_data == "Call expired, will be retried in next schedule window"
+      assert timeout.action_type == "contact"
     end
   end
 end

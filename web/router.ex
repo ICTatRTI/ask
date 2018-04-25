@@ -24,7 +24,7 @@ defmodule Ask.Router do
   end
 
   pipeline :api do
-    plug :accepts, ["json"]
+    plug :accepts, ["json", "json-api"]
     plug :fetch_session
     plug :fetch_flash
 
@@ -67,11 +67,14 @@ defmodule Ask.Router do
       resources "/projects", ProjectController, except: [:new, :edit] do
         delete "/memberships/remove", MembershipController, :remove, as: :membership_remove
         put "/memberships/update", MembershipController, :update, as: :membership_update
+        resources "/channels", ChannelController, only: [:index]
         resources "/surveys", SurveyController, except: [:new, :edit] do
+          post "/set_name", SurveyController, :set_name
           post "/launch", SurveyController, :launch
           post "/stop", SurveyController, :stop
           post "/config", SurveyController, :config
           get "/config", SurveyController, :config
+          resources "/integrations", IntegrationController, only: [:index, :create]
           resources "/respondents", RespondentController, only: [:index]
           resources "/respondent_groups", RespondentGroupController, only: [:index, :create, :update, :delete] do
             post "/add", RespondentGroupController, :add, as: :add
@@ -80,6 +83,14 @@ defmodule Ask.Router do
           get "/respondents/stats", RespondentController, :stats, as: :respondents_stats
           get "/simulation_status", SurveyController, :simulation_status
           post "/stop_simulation", SurveyController, :stop_simulation
+          get "/links/:name", SurveyController, :create_link, as: :links
+          put "/links/:name", SurveyController, :refresh_link, as: :links
+          delete "/links/:name", SurveyController, :delete_link, as: :links
+          scope "/flow-results" do
+            get "/packages", FloipController, :index, as: :packages
+            get "/packages/:floip_package_id", FloipController, :show, as: :package_descriptor
+            get "/packages/:floip_package_id/responses", FloipController, :responses, as: :package_responses
+          end
         end
         post "/surveys/simulate_questionanire", SurveyController, :simulate_questionanire
         resources "/questionnaires", QuestionnaireController, except: [:new, :edit] do
@@ -90,7 +101,9 @@ defmodule Ask.Router do
         get "/autocomplete_primary_language", ProjectController, :autocomplete_primary_language, as: :autocomplete_primary_language
         get "/autocomplete_other_language", ProjectController, :autocomplete_other_language, as: :autocomplete_other_language
         get "/collaborators", ProjectController, :collaborators, as: :collaborators
+        get "/activities", ProjectController, :activities, as: :activities
         post "/leave", ProjectController, :leave, as: :leave
+        put "/update_archived_status", ProjectController, :update_archived_status, as: :update_archived_status
       end
       resources "/channels", ChannelController, except: [:new, :edit]
       resources "/audios", AudioController, only: [:create, :show]
@@ -136,6 +149,7 @@ defmodule Ask.Router do
   get "/mobile_survey/get_step/:respondent_id", Ask.MobileSurveyController, :get_step
   post "/mobile_survey/send_reply/:respondent_id", Ask.MobileSurveyController, :send_reply
   get "/mobile_survey/errors/unauthorized", Ask.MobileSurveyController, :unauthorized_error
+  get "/link/:hash", Ask.ShortLinkController, :access
 
   scope "/", Ask do
     pipe_through :browser

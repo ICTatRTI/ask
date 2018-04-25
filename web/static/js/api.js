@@ -12,6 +12,8 @@ const respondentsStatsSchema = new Schema('respondents')
 const referenceSchema = new Schema('reference')
 const channelSchema = new Schema('channels')
 const audioSchema = new Schema('audios')
+const activitySchema = new Schema('activities')
+const integrationSchema = new Schema('integrations')
 
 export class Unauthorized {
   constructor(response) {
@@ -76,6 +78,14 @@ const respondentsCallback = (json, schema) => {
   }
 }
 
+const activitiesCallback = (json, schema) => {
+  return () => {
+    let normalized = normalize(camelizeKeys(json.data.activities), schema)
+    normalized.activitiesCount = parseInt(json.meta.count)
+    return normalized
+  }
+}
+
 const handleResponse = (response, callback) => {
   if (response.ok) {
     return callback()
@@ -87,6 +97,10 @@ const handleResponse = (response, callback) => {
 }
 
 const apiPutOrPostJSON = (url, schema, verb, body) => {
+  return apiPutOrPostJSONWithCallback(url, schema, verb, body, commonCallback)
+}
+
+const apiPutOrPostJSONWithCallback = (url, schema, verb, body, callback) => {
   const options = {
     method: verb,
     headers: {
@@ -97,7 +111,7 @@ const apiPutOrPostJSON = (url, schema, verb, body) => {
   if (body) {
     options.body = JSON.stringify(decamelizeKeys(body, { separator: '_' }))
   }
-  return apiFetchJSON(url, schema, options)
+  return apiFetchJSONWithCallback(url, schema, options, callback)
 }
 
 const apiPostJSON = (url, schema, body) => {
@@ -125,8 +139,8 @@ const newFormData = (file) => {
   return formData
 }
 
-export const fetchProjects = () => {
-  return apiFetchJSON(`projects`, arrayOf(projectSchema))
+export const fetchProjects = (options) => {
+  return apiFetchJSON(`projects?archived=${options['archived']}`, arrayOf(projectSchema))
 }
 
 export const fetchSurveys = (projectId) => {
@@ -212,24 +226,7 @@ export const fetchRespondents = (projectId, surveyId, limit, page, sortBy, sortA
 }
 
 export const fetchRespondentsStats = (projectId, surveyId) => {
-  return apiFetchJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/respondents/stats`, arrayOf(referenceSchema), {}, (json, schema) => {
-    return () => {
-      if (!json) { return null }
-      if (json.errors) {
-        console.log(json.errors)
-      }
-      const camelizedData = camelizeKeys(json.data)
-
-      if (camelizedData.reference) {
-        return normalize({
-          ...camelizedData,
-          reference: normalize(camelizedData.reference, schema).entities.reference
-        }, respondentsStatsSchema)
-      } else {
-        return normalize(camelizedData, respondentsStatsSchema)
-      }
-    }
-  })
+  return apiFetchJSON(`projects/${projectId}/surveys/${surveyId}/respondents/stats`, respondentsStatsSchema)
 }
 
 export const fetchRespondentGroups = (projectId, surveyId) => {
@@ -244,12 +241,32 @@ export const updateProject = (project) => {
   return apiPutJSON(`projects/${project.id}`, projectSchema, { project })
 }
 
+export const updateProjectArchived = (project) => {
+  return apiPutJSON(`projects/${project.id}/update_archived_status`, projectSchema, { project })
+}
+
 export const updateSurvey = (projectId, survey) => {
   return apiPutJSON(`projects/${projectId}/surveys/${survey.id}`, surveySchema, { survey })
 }
 
+export const setSurveyName = (projectId, surveyId, name) => {
+  return apiPostJSON(`projects/${projectId}/surveys/${surveyId}/set_name`, null, { name })
+}
+
 export const fetchChannels = () => {
   return apiFetchJSON(`channels`, arrayOf(channelSchema))
+}
+
+export const fetchProjectChannels = (projectId) => {
+  return apiFetchJSON(`projects/${projectId}/channels`, arrayOf(channelSchema))
+}
+
+export const fetchChannel = (channelId) => {
+  return apiFetchJSON(`channels/${channelId}`, channelSchema)
+}
+
+export const updateChannel = (channel) => {
+  return apiPutJSON(`/channels/${channel.id}`, channelSchema, { channel })
 }
 
 export const updateQuestionnaire = (projectId, questionnaire) => {
@@ -297,11 +314,19 @@ export const autocompleteVars = (projectId, text) => {
 export const autocompletePrimaryLanguage = (projectId, mode, scope, language, text) => {
   return apiFetch(`projects/${projectId}/autocomplete_primary_language?mode=${mode}&scope=${scope}&language=${language}&text=${encodeURIComponent(text)}`)
   .then(response => response.json())
+  .catch(error => {
+    console.log(error)
+    return []
+  })
 }
 
 export const autocompleteOtherLanguage = (projectId, mode, scope, primaryLanguage, otherLanguage, sourceText, targetText) => {
   return apiFetch(`projects/${projectId}/autocomplete_other_language?mode=${mode}&scope=${scope}&primary_language=${primaryLanguage}&other_language=${otherLanguage}&source_text=${encodeURIComponent(sourceText)}&target_text=${encodeURIComponent(targetText)}`)
   .then(response => response.json())
+  .catch(error => {
+    console.log(error)
+    return []
+  })
 }
 
 export const fetchCollaborators = (projectId) => {
@@ -314,6 +339,10 @@ export const removeCollaborator = (projectId, collaboratorEmail) => {
 
 export const updateCollaboratorLevel = (projectId, collaboratorEmail, newLevel) => {
   return apiPutJSON(`projects/${projectId}/memberships/update`, {}, { email: collaboratorEmail, level: newLevel })
+}
+
+export const fetchActivities = (projectId, limit, page, sortBy, sortAsc) => {
+  return apiFetchJSONWithCallback(`projects/${projectId}/activities?limit=${limit}&page=${page}&sort_by=${sortBy}&sort_asc=${sortAsc}`, arrayOf(activitySchema), {}, activitiesCallback)
 }
 
 export const fetchSettings = () => {
@@ -368,4 +397,70 @@ export const fetchSurveySimulationStatus = (projectId, surveyId) => {
 
 export const stopSurveySimulation = (projectId, surveyId) => {
   return apiPostJSON(`projects/${projectId}/surveys/${surveyId}/stop_simulation`, null, {})
+}
+
+const passthroughCallback = (json, _schema) => {
+  return () => {
+    if (!json) { return null }
+    if (json.errors) {
+      console.log(json.errors)
+    }
+    return camelizeKeys(json)
+  }
+}
+
+export const createResultsLink = (projectId, surveyId) => {
+  return apiFetchJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/results`, arrayOf(referenceSchema), {}, passthroughCallback)
+}
+
+export const createIncentivesLink = (projectId, surveyId) => {
+  return apiFetchJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/incentives`, arrayOf(referenceSchema), {}, passthroughCallback)
+}
+
+export const createInteractionsLink = (projectId, surveyId) => {
+  return apiFetchJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/interactions`, arrayOf(referenceSchema), {}, passthroughCallback)
+}
+
+export const createDispositionHistoryLink = (projectId, surveyId) => {
+  return apiFetchJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/disposition_history`, arrayOf(referenceSchema), {}, passthroughCallback)
+}
+
+export const refreshResultsLink = (projectId, surveyId) => {
+  return apiPutOrPostJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/results`, arrayOf(referenceSchema), 'PUT', {}, passthroughCallback)
+}
+
+export const refreshIncentivesLink = (projectId, surveyId) => {
+  return apiPutOrPostJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/incentives`, arrayOf(referenceSchema), 'PUT', {}, passthroughCallback)
+}
+
+export const refreshInteractionsLink = (projectId, surveyId) => {
+  return apiPutOrPostJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/interactions`, arrayOf(referenceSchema), 'PUT', {}, passthroughCallback)
+}
+
+export const refreshDispositionHistoryLink = (projectId, surveyId) => {
+  return apiPutOrPostJSONWithCallback(`projects/${projectId}/surveys/${surveyId}/links/disposition_history`, arrayOf(referenceSchema), 'PUT', {}, passthroughCallback)
+}
+
+export const deleteResultsLink = (projectId, surveyId) => {
+  return apiDelete(`projects/${projectId}/surveys/${surveyId}/links/results`)
+}
+
+export const deleteIncentivesLink = (projectId, surveyId) => {
+  return apiDelete(`projects/${projectId}/surveys/${surveyId}/links/incentives`)
+}
+
+export const deleteInteractionsLink = (projectId, surveyId) => {
+  return apiDelete(`projects/${projectId}/surveys/${surveyId}/links/interactions`)
+}
+
+export const deleteDispositionHistoryLink = (projectId, surveyId) => {
+  return apiDelete(`projects/${projectId}/surveys/${surveyId}/links/disposition_history`)
+}
+
+export const fetchIntegrations = (projectId, surveyId) => {
+  return apiFetchJSON(`projects/${projectId}/surveys/${surveyId}/integrations`, arrayOf(integrationSchema))
+}
+
+export const createIntegration = (projectId, surveyId, integration) => {
+  return apiPostJSON(`projects/${projectId}/surveys/${surveyId}/integrations`, integrationSchema, { integration })
 }

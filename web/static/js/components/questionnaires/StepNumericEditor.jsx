@@ -6,8 +6,13 @@ import { bindActionCreators } from 'redux'
 import * as questionnaireActions from '../../actions/questionnaire'
 import { newRefusal } from '../../step'
 import ChoiceEditor from './ChoiceEditor'
+import { translateLangCode } from '../timezones/util'
 import SkipLogic from './SkipLogic'
 import propsAreEqual from '../../propsAreEqual'
+import { config } from '../../config'
+import { difference } from 'lodash'
+import map from 'lodash/map'
+import { translate } from 'react-i18next'
 
 type State = {
   stepId: string,
@@ -96,6 +101,11 @@ class StepNumericEditor extends Component {
     questionnaireActions.toggleAcceptsRefusals(this.state.stepId)
   }
 
+  toggleAcceptsAlphabeticalAnswers(e) {
+    const { questionnaireActions } = this.props
+    questionnaireActions.toggleAcceptsAlphabeticalAnswers(this.state.stepId)
+  }
+
   changeRefusal() {
     const { questionnaireActions } = this.props
     return (response, smsValues, ivrValues, mobilewebValues, skipLogic, autoComplete = false) => {
@@ -104,9 +114,10 @@ class StepNumericEditor extends Component {
   }
 
   maybeTooltip(component, errors) {
+    const { t } = this.props
     if (errors && errors.length > 0) {
       return (
-        <Tooltip text={errors.join(', ')} position='bottom' className='error'>
+        <Tooltip text={map(errors, (error) => t(...error)).join(', ')} position='bottom' className='error'>
           {component}
         </Tooltip>
       )
@@ -116,7 +127,7 @@ class StepNumericEditor extends Component {
   }
 
   render() {
-    const { step, stepIndex, questionnaire, stepsAfter, stepsBefore, errorPath, errorsByPath, isNew, readOnly } = this.props
+    const { step, stepIndex, questionnaire, stepsAfter, stepsBefore, errorPath, errorsByPath, isNew, readOnly, t } = this.props
     const { ranges } = step
 
     const sms = questionnaire.activeMode == 'sms'
@@ -125,6 +136,7 @@ class StepNumericEditor extends Component {
 
     const refusal = step.refusal || newRefusal()
     const acceptsRefusals = !!refusal.enabled
+    const acceptsAlphabeticalAnswers = step.alphabeticalAnswers
 
     let minErrors = isNew ? null : errorsByPath[`${errorPath}.minValue`]
     let minClassName = minErrors && minErrors.length > 0 ? 'invalid' : null
@@ -133,7 +145,7 @@ class StepNumericEditor extends Component {
       <div className='col s12 m2 input-field inline'>
         <InputWithLabel id='step_numeric_editor_min_value'
           value={`${this.state.minValue}`}
-          label='Min value' >
+          label={t('Min value')} >
           <input
             disabled={readOnly}
             type='number'
@@ -154,8 +166,7 @@ class StepNumericEditor extends Component {
       <div className='col s12 m2 input-field inline delimiters'>
         <InputWithLabel id='step_numeric_editor_range_delimiters'
           value={this.state.rangesDelimiters}
-          label='Range delimiters'
-          >
+          label={t('Range delimiters')} >
           <input
             type='text'
             className={rangeClassName}
@@ -176,7 +187,7 @@ class StepNumericEditor extends Component {
       <div className='col s12 m2 input-field inline'>
         <InputWithLabel id='step_numeric_editor_max_value'
           value={`${this.state.maxValue}`}
-          label='Max value' >
+          label={t('Max value')} >
           <input
             type='number'
             className={maxClassName}
@@ -197,16 +208,16 @@ class StepNumericEditor extends Component {
           <table className='responses-table'>
             <thead>
               <tr>
-                <th style={{width: '30%'}}>From</th>
-                <th style={{width: '30%'}}>To</th>
-                <th style={{width: '30%'}}>Skip logic</th>
+                <th style={{width: '30%'}}>{t('From')}</th>
+                <th style={{width: '30%'}}>{t('To')}</th>
+                <th style={{width: '30%'}}>{t('Skip logic')}</th>
               </tr>
             </thead>
             <tbody>
               { ranges.map((range, index) =>
                 <tr key={`${range.from},${range.to}`}>
-                  <td>{range.from == null ? 'No limit' : range.from} </td>
-                  <td>{range.to == null ? 'No limit' : range.to} </td>
+                  <td>{range.from == null ? t('No limit') : range.from} </td>
+                  <td>{range.to == null ? t('No limit') : range.to} </td>
                   <td>
                     <SkipLogic
                       onChange={skipOption => this.skipLogicChange(skipOption, index)}
@@ -228,17 +239,17 @@ class StepNumericEditor extends Component {
     if (acceptsRefusals) {
       let smsHeader = null
       if (sms) {
-        smsHeader = <th style={{width: '30%'}}>SMS</th>
+        smsHeader = <th style={{width: '30%'}}>{t('SMS')}</th>
       }
 
       let ivrHeader = null
       if (ivr) {
-        ivrHeader = <th style={{width: '30%'}}>Phone call</th>
+        ivrHeader = <th style={{width: '30%'}}>{t('Phone call')}</th>
       }
 
       let mobilewebHeader = null
       if (mobileweb) {
-        mobilewebHeader = <th style={{width: '30%'}}>Mobile web</th>
+        mobilewebHeader = <th style={{width: '30%'}}>{t('Mobile web')}</th>
       }
 
       refusalComponent = <Card>
@@ -249,7 +260,7 @@ class StepNumericEditor extends Component {
                 {smsHeader}
                 {ivrHeader}
                 {mobilewebHeader}
-                <th style={{width: '30%'}}>Skip logic</th>
+                <th style={{width: '30%'}}>{t('Skip logic')}</th>
               </tr>
             </thead>
             <tbody>
@@ -278,10 +289,35 @@ class StepNumericEditor extends Component {
       </Card>
     }
 
+    let alphabeticalAnswersComponent = null
+    if (sms) {
+      const missingLanguages =
+        difference(questionnaire.languages, config.available_languages_for_numbers)
+        .map(lang => translateLangCode(lang))
+        .join(', ')
+
+      alphabeticalAnswersComponent =
+        <div>
+          <p>
+            <input id='accepts_alphabetical_answers' type='checkbox' checked={acceptsAlphabeticalAnswers} onChange={e => { this.toggleAcceptsAlphabeticalAnswers(e) }} disabled={readOnly} />
+            <label htmlFor='accepts_alphabetical_answers'>{t('Accepts alphabetical answers')}
+            </label>
+            <Tooltip className='large-tooltip' text={t('Checking this box will make the survey accept written numbers as valid numeric responses, like "one" or "fifty five". Written numbers are supported up to one hundred (100).')} acceptsHtml >
+              <i className='material-icons grey-text v-middle'>info_outline</i>
+            </Tooltip>
+          </p>
+          <p>
+            { (missingLanguages.length > 0)
+          ? <span className='text-error checkbox-error'>{`${t('Not supported for:', {context: 'missingLanguages'})} ${missingLanguages}`}</span>
+          : <span />
+        }
+          </p>
+        </div>
+    }
+
     return <div>
-      <h5>Responses</h5>
-      <p><b>Setup a valid range for user input. Leave min or max empty if not
-      applicable and enter range delimiters separated by comma if needed.</b></p>
+      <h5>{t('Responses')}</h5>
+      <p><b>{t('Setup a valid range for user input. Leave min or max empty if not applicable and enter range delimiters separated by comma if needed.')}</b></p>
       <div className='row range-fields'>
         {minValue}
         {rangesDelimiters}
@@ -291,14 +327,16 @@ class StepNumericEditor extends Component {
       <br />
       <p>
         <input id='accepts_refusals' type='checkbox' defaultChecked={acceptsRefusals} onClick={e => { this.toggleAcceptsRefusals(e) }} disabled={readOnly} />
-        <label htmlFor='accepts_refusals'>Accepts refusals</label>
+        <label htmlFor='accepts_refusals'>{t('Accepts refusals')}</label>
       </p>
       {refusalComponent}
+      {alphabeticalAnswersComponent}
     </div>
   }
 }
 
 StepNumericEditor.propTypes = {
+  t: PropTypes.func,
   questionnaireActions: PropTypes.object.isRequired,
   stepId: PropTypes.number,
   minValue: PropTypes.number,
@@ -320,4 +358,4 @@ const mapDispatchToProps = (dispatch) => ({
   questionnaireActions: bindActionCreators(questionnaireActions, dispatch)
 })
 
-export default connect(null, mapDispatchToProps)(StepNumericEditor)
+export default translate()(connect(null, mapDispatchToProps)(StepNumericEditor))

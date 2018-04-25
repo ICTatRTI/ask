@@ -6,8 +6,11 @@ import { Autocomplete } from '../ui'
 import * as questionnaireActions from '../../actions/questionnaire'
 import * as api from '../../api.js'
 import propsAreEqual from '../../propsAreEqual'
+import map from 'lodash/map'
+import { translate } from 'react-i18next'
 
 type Props = {
+  t: Function,
   step: StoreStep & BaseStep,
   questionnaireActions: any,
   errorPath: string,
@@ -73,20 +76,20 @@ class StepStoreVariable extends Component {
   }
 
   render() {
-    const { errorPath, errorsByPath } = this.props
+    const { errorPath, errorsByPath, t } = this.props
     let errors = errorsByPath[`${errorPath}.store`]
 
     let dataError = null
     let className = 'autocomplete'
     if (errors && errors.length > 0) {
       className += ' validate invalid'
-      dataError = errors.join(', ')
+      dataError = map(errors, (error) => t(...error)).join(', ')
     }
 
     return (<li className='collection-item' key='variable_name'>
       <div className='row'>
         <div className='col s12'>
-          Variable name:
+          {t('Variable name:')}
           <div className='input-field inline min-width'>
             <input
               type='text'
@@ -125,4 +128,4 @@ const mapDispatchToProps = (dispatch) => ({
   questionnaireActions: bindActionCreators(questionnaireActions, dispatch)
 })
 
-export default connect(mapStateToProps, mapDispatchToProps)(StepStoreVariable)
+export default translate()(connect(mapStateToProps, mapDispatchToProps)(StepStoreVariable))

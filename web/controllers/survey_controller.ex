@@ -1,8 +1,9 @@
 defmodule Ask.SurveyController do
   use Ask.Web, :api_controller
 
-  alias Ask.{Project, Survey, Questionnaire, Logger, RespondentGroup, Respondent, Channel}
+  alias Ask.{Project, Survey, Questionnaire, Logger, RespondentGroup, Respondent, Channel, ShortLink, ActivityLog}
   alias Ask.Runtime.Session
+  alias Ecto.Multi
 
   def index(conn, %{"project_id" => project_id} = params) do
     project = conn
@@ -40,6 +41,7 @@ defmodule Ask.SurveyController do
   def create(conn, params = %{"project_id" => project_id}) do
     project = conn
     |> load_project_for_change(project_id)
+    |> validate_project_not_archived(conn)
 
     survey_params = Map.get(params, "survey", %{})
     timezone = Map.get(survey_params, "timezone", Ask.Schedule.default_timezone())
@@ -52,14 +54,21 @@ defmodule Ask.SurveyController do
     |> build_assoc(:surveys)
     |> Survey.changeset(props)
 
-    case Repo.insert(changeset) do
-      {:ok, survey} ->
+    multi = Multi.new
+    |> Multi.insert(:survey, changeset)
+    |> Multi.run(:log, fn %{survey: survey} ->
+      ActivityLog.create_survey(project, conn, survey) |> Repo.insert
+    end)
+    |> Repo.transaction
+
+    case multi do
+      {:ok, %{survey: survey}} ->
         project |> Project.touch!
         conn
         |> put_status(:created)
         |> put_resp_header("location", project_survey_path(conn, :show, project_id, survey))
-        |> render("show.json", survey: survey |> Repo.preload([:quota_buckets]))
-      {:error, changeset} ->
+        |> render("show.json", survey: survey |> Repo.preload([:quota_buckets]) |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(project_id, current_user(conn).id)))
+      {:error, _, changeset, _} ->
         Logger.warn "Error when creating a survey: #{inspect changeset}"
         conn
         |> put_status(:unprocessable_entity)
@@ -73,30 +82,83 @@ defmodule Ask.SurveyController do
     |> assoc(:surveys)
     |> Repo.get!(id)
     |> Repo.preload([:quota_buckets])
+    |> Repo.preload(:questionnaires)
+    |> Survey.with_links(user_level(project_id, current_user(conn).id))
 
     render(conn, "show.json", survey: survey)
   end
 
   def update(conn, %{"project_id" => project_id, "id" => id, "survey" => survey_params}) do
     project = conn
-    |> load_project_for_change(project_id)
+      |> load_project_for_change(project_id)
 
-    changeset = project
-    |> assoc(:surveys)
-    |> Repo.get!(id)
-    |> Repo.preload([:questionnaires])
-    |> Repo.preload([:quota_buckets])
-    |> Repo.preload(respondent_groups: [respondent_group_channels: :channel])
-    |> Survey.changeset(survey_params)
-    |> update_questionnaires(survey_params)
-    |> Survey.update_state
+    survey = project
+      |> assoc(:surveys)
+      |> Repo.get!(id)
 
-    case Repo.update(changeset, force: Map.has_key?(changeset.changes, :questionnaires)) do
-      {:ok, survey} ->
-        project |> Project.touch!
-        render(conn, "show.json", survey: survey)
-      {:error, changeset} ->
-        Logger.warn "Error when updating survey: #{inspect changeset}"
+    if survey |> Survey.editable? do
+      changeset = survey
+        |> Repo.preload([:questionnaires])
+        |> Repo.preload([:quota_buckets])
+        |> Repo.preload(respondent_groups: [respondent_group_channels: :channel])
+        |> Survey.changeset(survey_params)
+        |> update_questionnaires(survey_params)
+        |> Survey.update_state
+
+      changed_properties = changed_properties(changeset)
+      rename_log = if :name in changed_properties, do: ActivityLog.rename_survey(project, conn, survey, survey.name, changeset.changes.name), else: nil
+      edit_log = if Enum.any?(changed_properties, &(&1 != :name)), do: ActivityLog.edit_survey(project, conn, survey), else: nil
+
+      multi = Multi.new
+      |> Multi.run(:survey, fn _ ->
+        Repo.update(changeset, force: Map.has_key?(changeset.changes, :questionnaires))
+      end)
+      |> Multi.run(:rename_log, fn _ ->
+        if rename_log, do: rename_log |> Repo.insert, else: {:ok, nil}
+      end)
+      |> Multi.run(:edit_log, fn _ ->
+        if edit_log, do: edit_log |> Repo.insert, else: {:ok, nil}
+      end)
+      |> Repo.transaction
+
+      case multi do
+        {:ok, %{survey: survey}} ->
+          project |> Project.touch!
+          render(conn, "show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(project_id, current_user(conn).id)))
+        {:error, _, changeset, _} ->
+          Logger.warn "Error when updating survey: #{inspect changeset}"
+          conn
+            |> put_status(:unprocessable_entity)
+            |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+      end
+    else
+      conn
+        |> put_status(:unprocessable_entity)
+        |> render(Ask.ChangesetView, "error.json", changeset: change(%Survey{}, %{}))
+    end
+  end
+
+  def set_name(conn, %{"project_id" => project_id, "survey_id" => survey_id, "name" => name}) do
+    project =
+      conn
+      |> load_project_for_change(project_id)
+
+    survey =
+      project
+      |> assoc(:surveys)
+      |> Repo.get!(survey_id)
+
+    result =
+      Multi.new()
+      |> Multi.update(:set_name, Survey.changeset(survey, %{name: name}))
+      |> Multi.insert(:rename_log, ActivityLog.rename_survey(project, conn, survey, survey.name, name))
+      |> Repo.transaction()
+
+    case result do
+      {:ok, _} ->
+        send_resp(conn, :no_content, "")
+
+      {:error, _, changeset, _} ->
         conn
         |> put_status(:unprocessable_entity)
         |> render(Ask.ChangesetView, "error.json", changeset: changeset)
@@ -129,12 +191,20 @@ defmodule Ask.SurveyController do
         send_resp(conn, :bad_request, "")
 
       _ ->
-        survey
-        |> Repo.delete!
+        multi = Multi.new
+        |> Multi.delete(:survey, survey)
+        |> Multi.insert(:log, ActivityLog.delete_survey(project, conn, survey))
+        |> Repo.transaction
 
-        project |> Project.touch!
-
-        send_resp(conn, :no_content, "")
+        case multi do
+          {:ok, _} ->
+            project |> Project.touch!
+            send_resp(conn, :no_content, "")
+          {:error, _, changeset, _} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+        end
     end
   end
 
@@ -149,7 +219,7 @@ defmodule Ask.SurveyController do
       Logger.warn "Error when launching survey #{id}. State is not ready "
       conn
         |> put_status(:unprocessable_entity)
-        |> render("show.json", survey: survey)
+        |> render("show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(survey.project_id, current_user(conn).id)))
     else
       project = conn
       |> load_project_for_change(survey.project_id)
@@ -161,12 +231,20 @@ defmodule Ask.SurveyController do
       case prepare_channels(conn, channels) do
         :ok ->
           changeset = Survey.changeset(survey, %{"state": "running", "started_at": Timex.now})
-          case Repo.update(changeset) do
-            {:ok, survey} ->
+
+          multi = Multi.new
+          |> Multi.update(:survey, changeset)
+          |> Multi.insert(:log, ActivityLog.start(project, conn, survey))
+          |> Repo.transaction
+
+          case multi do
+            {:ok, _} ->
               survey = create_survey_questionnaires_snapshot(survey)
+              |> Repo.preload(:questionnaires)
+              |> Survey.with_links(user_level(survey.project_id, current_user(conn).id))
               project |> Project.touch!
               render(conn, "show.json", survey: survey)
-            {:error, changeset} ->
+            {:error, _, changeset, _} ->
               Logger.warn "Error when launching survey: #{inspect changeset}"
               conn
               |> put_status(:unprocessable_entity)
@@ -177,7 +255,7 @@ defmodule Ask.SurveyController do
           Logger.warn "Error when preparing channels for launching survey #{id} (#{reason})"
           conn
           |> put_status(:unprocessable_entity)
-          |> render("show.json", survey: survey)
+          |> render("show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(survey.project_id, current_user(conn).id)))
       end
     end
   end
@@ -342,6 +420,134 @@ defmodule Ask.SurveyController do
     render(conn, "config.json", config: Survey.config_rates())
   end
 
+  def create_link(conn, %{"project_id" => project_id, "survey_id" => survey_id, "name" => target_name}) do
+
+    project = conn
+    |> load_project_for_change(project_id)
+
+    survey = project
+    |> assoc(:surveys)
+    |> Repo.get!(survey_id)
+
+    {name, target} = case target_name do
+      "results" ->
+        {
+          Survey.link_name(survey, :results),
+          project_survey_respondents_results_path(conn, :results, project, survey, %{"_format" => "csv"})
+        }
+      "incentives" ->
+        authorize_admin(project, conn)
+        {
+          Survey.link_name(survey, :incentives),
+          project_survey_respondents_incentives_path(conn, :incentives, project, survey, %{"_format" => "csv"})
+        }
+      "interactions" ->
+        authorize_admin(project, conn)
+        {
+          Survey.link_name(survey, :interactions),
+          project_survey_respondents_interactions_path(conn, :interactions, project, survey, %{"_format" => "csv"})
+        }
+      "disposition_history" ->
+        {
+          Survey.link_name(survey, :disposition_history),
+          project_survey_respondents_disposition_history_path(conn, :disposition_history, project, survey, %{"_format" => "csv"})
+        }
+      _ ->
+        Logger.warn "Error when creating link #{target_name}"
+        conn
+        |> put_status(:unprocessable_entity)
+        |> send_resp(:no_content, target_name)
+    end
+
+    multi = Multi.new
+    |> Multi.run(:generate_link, fn _ -> ShortLink.generate_link(name, target) end)
+    |> Multi.insert(:log, ActivityLog.enable_public_link(project, conn, survey, target_name))
+    |> Repo.transaction
+
+    case multi do
+      {:ok, %{generate_link: link}} ->
+        render(conn, "link.json", link: link)
+      {:error, _, changeset, _} ->
+        Logger.warn "Error when creating link #{name}"
+        conn
+        |> put_status(:unprocessable_entity)
+        |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+    end
+  end
+
+  def refresh_link(conn, %{"project_id" => project_id, "survey_id" => survey_id, "name" => target_name}) do
+    project = conn
+    |> load_project_for_change(project_id)
+
+    if target_name == "interactions" || target_name == "incentives" do
+      authorize_admin(project, conn)
+    end
+
+    survey = project
+    |> assoc(:surveys)
+    |> Repo.get!(survey_id)
+
+    link = ShortLink
+    |> Repo.get_by(name: Survey.link_name(survey, String.to_atom(target_name)))
+
+    if link do
+      multi = Multi.new
+      |> Multi.run(:regenerate, fn _ -> ShortLink.regenerate(link) end)
+      |> Multi.insert(:log, ActivityLog.regenerate_public_link(project, conn, survey, target_name))
+      |> Repo.transaction
+
+      case multi do
+        {:ok, %{regenerate: new_link}} ->
+          render(conn, "link.json", link: new_link)
+        {:error, _, changeset, _} ->
+          Logger.warn "Error when regenerating results link #{inspect link}"
+          conn
+          |> put_status(:unprocessable_entity)
+          |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+      end
+    else
+      Logger.warn "Error when regenerating results link #{target_name}"
+      conn
+      |> put_status(:unprocessable_entity)
+      |> send_resp(:no_content, target_name)
+    end
+  end
+
+  def delete_link(conn, %{"project_id" => project_id, "survey_id" => survey_id, "name" => target_name}) do
+    project = conn
+    |> load_project_for_change(project_id)
+
+    if target_name == "interactions" || target_name == "incentives" do
+      authorize_admin(project, conn)
+    end
+
+    survey = project
+    |> assoc(:surveys)
+    |> Repo.get!(survey_id)
+
+    link = ShortLink
+    |> Repo.get_by(name: Survey.link_name(survey, String.to_atom(target_name)))
+
+    if link do
+      multi = Multi.new
+      |> Multi.delete(:delete, link)
+      |> Multi.insert(:log, ActivityLog.disable_public_link(project, conn, survey, link))
+      |> Repo.transaction
+
+      case multi do
+        {:ok, _} -> send_resp(conn, :no_content, "")
+        {:error, _, changeset, _} ->
+          Logger.warn "Error when deleting link #{inspect link}"
+          conn
+          |> put_status(:unprocessable_entity)
+          |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+      end
+    else
+      conn
+      |> send_resp(:not_found, "")
+    end
+  end
+
   def stop(conn, %{"survey_id" => id}) do
     survey = Repo.get!(Survey, id)
     |> Repo.preload([:quota_buckets])
@@ -356,7 +562,7 @@ defmodule Ask.SurveyController do
         # We must not error, because this can happen if a user has the survey
         # UI open with the cancel button, and meanwhile the survey finished
         conn
-          |> render("show.json", survey: survey)
+          |> render("show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(survey.project_id, current_user(conn).id)))
       "running" ->
         project = conn
           |> load_project_for_change(survey.project_id)
@@ -365,11 +571,17 @@ defmodule Ask.SurveyController do
         Survey.cancel_respondents(survey)
 
         changeset = Survey.changeset(survey, %{"state": "terminated", "exit_code": 1, "exit_message": "Cancelled by user"})
-        case Repo.update(changeset) do
-          {:ok, survey} ->
+
+        multi = Multi.new
+        |> Multi.update(:survey, changeset)
+        |> Multi.insert(:log, ActivityLog.stop(project, conn, survey))
+        |> Repo.transaction
+
+        case multi do
+          {:ok, %{survey: survey}} ->
             project |> Project.touch!
-            render(conn, "show.json", survey: survey)
-          {:error, changeset} ->
+            render(conn, "show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(survey.project_id, current_user(conn).id)))
+          {:error, _, changeset, _} ->
             Logger.warn "Error when stopping survey #{inspect survey}"
             conn
             |> put_status(:unprocessable_entity)
@@ -381,7 +593,7 @@ defmodule Ask.SurveyController do
         Logger.warn "Error when stopping survey #{inspect survey}: Wrong state"
         conn
           |> put_status(:unprocessable_entity)
-          |> render("show.json", survey: survey)
+          |> render("show.json", survey: survey |> Repo.preload(:questionnaires) |> Survey.with_links(user_level(survey.project_id, current_user(conn).id)))
       end
   end
 

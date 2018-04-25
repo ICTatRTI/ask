@@ -2,16 +2,16 @@ var webpack = require('webpack')
 var path = require('path')
 var ExtractTextPlugin = require('extract-text-webpack-plugin')
 var CopyWebpackPlugin = require('copy-webpack-plugin')
+const i18nextWebpackPlugin = require('i18next-scanner-webpack')
 
 module.exports = {
   resolve: {
     modules: [
-      path.join(__dirname, '/node_modules'),
+      'node_modules',
       path.join(__dirname, '/web/static/js')
     ],
     extensions: ['.js', '.jsx']
   },
-
   entry: {
     app: [
       './web/static/vendor/js/materialize.js',
@@ -63,7 +63,8 @@ module.exports = {
               loader: 'sass-loader?sourceMap',
               options: {
                 includePaths: [
-                  path.join(__dirname, '/web/static/vendor/css')
+                  path.join(__dirname, '/web/static/vendor/css'),
+                  path.join(__dirname, '/node_modules')
                 ]
               }
             }
@@ -83,6 +84,37 @@ module.exports = {
   devtool: 'cheap-module-source-map',
 
   plugins: [
+    new i18nextWebpackPlugin({ // eslint-disable-line
+      src: path.resolve(__dirname, './web/static/js/**/*.{js,jsx}'),
+      dest: path.resolve(__dirname, 'locales'),
+      options: {
+        func: {
+          list: ['i18next.t', 'i18n.t', 't', 'k'],
+          extensions: ['.js', '.jsx']
+        },
+        trans: {
+          component: 'Trans',
+          i18nKey: 'i18nKey',
+          extensions: ['.js', '.jsx'],
+          fallbackKey: function(ns, value) {
+            return value
+          }
+        },
+        defaultLng: 'template',
+        defaultValue: '',
+        sort: true,
+        keySeparator: false,
+        nsSeparator: false,
+        lngs: ['template'],
+        interpolation: {
+          prefix: '{{',
+          suffix: '}}'
+        },
+        resource: {
+          savePath: '{{lng}}/{{ns}}.json'
+        }
+      }
+    }),
     new ExtractTextPlugin('css/[name].css'),
     new CopyWebpackPlugin([{ from: './web/static/assets' }]),
     new webpack.ProvidePlugin({

@@ -3,19 +3,27 @@ defmodule Ask.ProjectController do
 
   alias Ask.{Project, Survey, ProjectMembership, Invite, Logger}
 
-  def index(conn, _params) do
-    memberships = conn
-    |> current_user
-    |> assoc(:project_memberships)
-    |> preload(:project)
+  def index(conn, params) do
+    archived = case params["archived"] do
+      "true" -> true
+      _ -> false
+    end
+
+    current_user = conn |> current_user
+
+    projects = current_user
+    |> assoc([:project_memberships, :project])
+    |> where([p], p.archived == ^archived)
+    |> preload(:project_memberships)
     |> Repo.all
 
-    projects = memberships
-    |> Enum.map(&(&1.project))
+    memberships = projects
+    |> Enum.map(&(&1.project_memberships))
+    |> List.flatten
+    |> Enum.filter(&(&1.user_id == current_user.id))
     |> Enum.uniq
 
-    levels_by_project = memberships
-    |> Enum.group_by(&(&1.project_id))
+    levels_by_project = memberships |> Enum.group_by(&(&1.project_id))
     |> Enum.to_list
     |> Enum.map(fn {id, memberships} ->
       level =
@@ -25,7 +33,11 @@ defmodule Ask.ProjectController do
           if Enum.any?(memberships, &(&1.level == "editor")) do
             "editor"
           else
-            "reader"
+            if Enum.any?(memberships, &(&1.level == "admin")) do
+              "admin"
+            else
+              "reader"
+            end
           end
         end
       {id, level}
@@ -64,7 +76,7 @@ defmodule Ask.ProjectController do
         conn
         |> put_status(:created)
         |> put_resp_header("location", project_path(conn, :show, project))
-        |> render("show.json", project: project, read_only: false, owner: true)
+        |> render("show.json", project: project, read_only: false, owner: true, level: "owner")
       {:error, changeset} ->
         Logger.warn "Error when creating a new project: #{inspect changeset}"
         conn
@@ -89,11 +101,11 @@ defmodule Ask.ProjectController do
     |> Repo.one
 
     if membership do
-      read_only = membership.level == "reader"
+      read_only = membership.level == "reader" || project.archived
       owner = membership.level == "owner"
-      render(conn, "show.json", project: project, read_only: read_only, owner: owner)
+      render(conn, "show.json", project: project, read_only: read_only, owner: owner, level: membership.level)
     else
-      raise Ask.UnauthorizedError, conn: conn
+      raise Ask.UnauthorizedError
     end
   end
 
@@ -115,7 +127,40 @@ defmodule Ask.ProjectController do
         |> Repo.one
 
         owner = membership.level == "owner"
-        render(conn, "show.json", project: project, read_only: false, owner: owner)
+        render(conn, "show.json", project: project, read_only: false, owner: owner, level: membership.level)
+      {:error, changeset} ->
+        Logger.warn "Error when updating project #{project.id}: #{inspect changeset}"
+        conn
+        |> put_status(:unprocessable_entity)
+        |> render(Ask.ChangesetView, "error.json", changeset: changeset)
+    end
+  end
+
+  def update_archived_status(conn, %{"project_id" => id, "project" => project_params}) do
+    project = conn
+    |> load_project_for_owner(id)
+
+    archived = case project_params["archived"] do
+      "true" -> true
+      "false" -> false
+      other -> other
+    end
+
+    changeset = project
+    |> Project.changeset(%{archived: archived})
+
+    case Repo.update(changeset) do
+      {:ok, project} ->
+        user = conn
+        |> current_user
+
+        membership = project
+        |> assoc(:project_memberships)
+        |> where([m], m.user_id == ^user.id)
+        |> Repo.one
+
+        owner = membership.level == "owner"
+        render(conn, "show.json", project: project, read_only: false, owner: owner, level: membership.level)
       {:error, changeset} ->
         Logger.warn "Error when updating project #{project.id}: #{inspect changeset}"
         conn
@@ -233,5 +278,38 @@ defmodule Ask.ProjectController do
     |> Enum.map( fn x -> %{email: x.email, level: x.level, invited: true, code: x.code} end )
 
     render(conn, "collaborators.json", collaborators: memberships ++ invites)
+  end
+
+  def activities(conn, %{"project_id" => id} = params) do
+    limit = Map.get(params, "limit", "")
+    page = Map.get(params, "page", "")
+    sort_by = Map.get(params, "sort_by", "")
+    sort_asc = Map.get(params, "sort_asc", "")
+
+    all_activities_query = conn
+    |> load_project(id)
+    |> assoc(:activity_logs)
+
+    all_activities_count = all_activities_query |> select(count("*")) |> Repo.one
+
+    activities = all_activities_query
+    |> preload(:user)
+    |> conditional_limit(limit)
+    |> conditional_page(limit, page)
+    |> sort_activities(sort_by, sort_asc)
+    |> Repo.all
+
+    render(conn, "activities.json", activities: activities, activities_count: all_activities_count)
+  end
+
+  defp sort_activities(query, sort_by, sort_asc) do
+    case {sort_by, sort_asc} do
+      {"insertedAt", "true"} ->
+        query |> order_by([log], asc: log.inserted_at)
+      {"insertedAt", "false"} ->
+        query |> order_by([log], desc: log.inserted_at)
+      _ ->
+        query
+    end
   end
 end

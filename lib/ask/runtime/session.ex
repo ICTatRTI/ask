@@ -1,14 +1,16 @@
 defmodule Ask.Runtime.Session do
   import Ecto.Query
   import Ecto
-  alias Ask.{Repo, QuotaBucket, Respondent}
+  alias Ask.{Repo, QuotaBucket, Respondent, Schedule}
   alias Ask.Runtime.Flow.TextVisitor
   alias Ask.Runtime.{Broker, Flow, Channel, Session, Reply, SurveyLogger, ReplyStep, SessionMode, SessionModeProvider, SMSMode, IVRMode, MobileWebMode}
-  defstruct [:current_mode, :fallback_mode, :flow, :respondent, :token, :fallback_delay, :channel_state, :count_partial_results]
+  use Timex
+
+  defstruct [:current_mode, :fallback_mode, :flow, :respondent, :token, :fallback_delay, :channel_state, :count_partial_results, :schedule]
 
   @default_fallback_delay 10
 
-  def start(questionnaire, respondent, channel, mode, retries \\ [], fallback_channel \\ nil, fallback_mode \\ nil, fallback_retries \\ [], fallback_delay \\ @default_fallback_delay, count_partial_results \\ false) do
+  def start(questionnaire, respondent, channel, mode, schedule, retries \\ [], fallback_channel \\ nil, fallback_mode \\ nil, fallback_retries \\ [], fallback_delay \\ @default_fallback_delay, count_partial_results \\ false) do
     flow = Flow.start(questionnaire, mode)
     session = %Session{
       current_mode: SessionModeProvider.new(mode, channel, retries),
@@ -16,7 +18,8 @@ defmodule Ask.Runtime.Session do
       flow: flow,
       respondent: respondent,
       fallback_delay: fallback_delay,
-      count_partial_results: count_partial_results
+      count_partial_results: count_partial_results,
+      schedule: schedule
     }
     run_flow(session)
   end
@@ -29,27 +32,37 @@ defmodule Ask.Runtime.Session do
     runtime_channel = Ask.Channel.runtime_channel(channel)
 
     # Is this really necessary?
-    Channel.setup(runtime_channel, respondent, token)
+    Channel.setup(runtime_channel, respondent, token, nil, nil)
 
     case flow |> Flow.step(session.current_mode |> SessionMode.visitor) do
       {:end, _, reply} ->
-        if Reply.prompts(reply) != [] do
+        respondent = if Reply.prompts(reply) != [] do
           log_prompts(reply, channel, flow.mode, respondent, true)
           runtime_channel |> Channel.ask(respondent, token, reply)
+        else
+          respondent
         end
         {:end, reply, respondent}
       {:ok, flow, reply} ->
         log_prompts(reply, channel, flow.mode, respondent)
-        runtime_channel |> Channel.ask(respondent, token, reply)
+        respondent = runtime_channel |> Channel.ask(respondent, token, reply)
         {:ok, %{session | flow: flow}, reply, current_timeout(session), respondent}
     end
   end
 
-  defp mode_start(%Session{flow: flow, current_mode: %IVRMode{channel: channel}, respondent: respondent, token: token} = session) do
+  defp mode_start(%Session{flow: flow, current_mode: %IVRMode{channel: channel}, respondent: respondent, token: token, schedule: schedule} = session) do
+
+    next_available_date_time = schedule
+      |> Schedule.next_available_date_time
+
+    today_end_time = schedule
+      |> Schedule.at_end_time(next_available_date_time)
+
     channel_state = channel
-    |> Ask.Channel.runtime_channel
-    |> Channel.setup(respondent, token)
-    |> handle_setup_response
+      |> Ask.Channel.runtime_channel
+      |> Channel.setup(respondent, token, next_available_date_time, today_end_time)
+      |> handle_setup_response
+
     log_contact("Enqueueing call", channel, flow.mode, respondent)
 
     session = %{session| channel_state: channel_state}
@@ -60,12 +73,12 @@ defmodule Ask.Runtime.Session do
     runtime_channel = Ask.Channel.runtime_channel(channel)
 
     # Is this really necessary?
-    Channel.setup(runtime_channel, respondent, token)
+    Channel.setup(runtime_channel, respondent, token, nil, nil)
 
     reply = mobile_contact_reply(session)
 
     log_prompts(reply, session.current_mode.channel, flow.mode, session.respondent)
-    runtime_channel |> Channel.ask(respondent, token, reply)
+    respondent = runtime_channel |> Channel.ask(respondent, token, reply)
     {:ok, %{session | flow: flow}, reply, current_timeout(session), respondent}
   end
 
@@ -183,52 +196,110 @@ defmodule Ask.Runtime.Session do
     %{session | token: nil}
   end
 
-  # Process retries. If there are no more retries, mark session as failed.
-  # We ran out of retries, and there is no fallback specified
-  def timeout(%{current_mode: %{retries: []}, fallback_mode: nil, respondent: respondent} = session) do
-    case session.current_mode do
-      %SMSMode{} -> {:stalled, session |> clear_token, respondent}
-      %IVRMode{} -> {:failed, respondent}
-      %MobileWebMode{} -> {:stalled, session |> clear_token, respondent}
+  def timeout(%{channel_state: channel_state, respondent: respondent} = session) do
+    runtime_channel = Ask.Channel.runtime_channel(session.current_mode.channel)
+
+    cond do
+      Channel.has_queued_message?(runtime_channel, channel_state) ->
+        {:ok, session, %Reply{}, current_timeout(session), respondent}
+
+      Channel.message_expired?(runtime_channel, channel_state) ->
+        session = retry(session, runtime_channel)
+
+        next_available_date_time = session.schedule |> Schedule.next_available_date_time
+
+        base_timeout = Interval.new(from: DateTime.utc_now, until: next_available_date_time)
+          |> Interval.duration(:minutes)
+
+        {:ok, session, %Reply{}, base_timeout + current_timeout(session), session.respondent}
+      true ->
+        timeout(session, runtime_channel)
     end
   end
 
-  # If there is a fallback specified, switch session to use it
-  def timeout(%{current_mode: %{retries: []}} = session), do: switch_to_fallback(session)
+  def timeout(%{current_mode: %{retries: []}, fallback_mode: nil} = session, _) do
+    terminate(session)
+  end
 
-  # Let's try again
-  def timeout(%{current_mode: %{retries: [_ | retries]}, channel_state: channel_state, respondent: respondent} = session) do
-    runtime_channel = Ask.Channel.runtime_channel(session.current_mode.channel)
+  def timeout(%{current_mode: %{retries: []}} = session, _) do
+    switch_to_fallback_mode(session)
+  end
 
-    # First, check if there's already a queued message in the channel, to
-    # avoid queueing another one before even trying to send the first one.
-    if Channel.has_queued_message?(runtime_channel, channel_state) do
-      {:ok, session, %Reply{}, current_timeout(session), respondent}
-    else
-      token = Ecto.UUID.generate
-      channel_state =
-        case session.current_mode do
-          %SMSMode{} ->
-            {:ok, _flow, reply} = Flow.retry(session.flow, TextVisitor.new("sms"))
-            log_prompts(reply, session.current_mode.channel, session.flow.mode, session.respondent)
-            runtime_channel |> Channel.ask(session.respondent, token, reply)
-            channel_state
+  def timeout(session, runtime_channel) do
+    session = session
+      |> retry(runtime_channel)
+      |> consume_retry()
 
-          %IVRMode{} ->
-            log_contact("Timeout. Call failed.", session.current_mode.channel, session.flow.mode, respondent)
-            setup_response = runtime_channel |> Channel.setup(session.respondent, token)
-            handle_setup_response(setup_response)
+    # The new session will timeout as defined by hd(retries)
+    {:ok, session, %Reply{}, current_timeout(session), session.respondent}
+  end
 
-          %MobileWebMode{} ->
-            reply = mobile_contact_reply(session)
-            log_prompts(reply, session.current_mode.channel, session.flow.mode, session.respondent)
-            runtime_channel |> Channel.ask(session.respondent, token, reply)
-            channel_state
-        end
-      # The new session will timeout as defined by hd(retries)
-      session = %{session | current_mode: %{session.current_mode | retries: retries}, token: token, channel_state: channel_state}
-      {:ok, session, %Reply{}, current_timeout(session), respondent}
-    end
+  def terminate(%{current_mode: %SMSMode{}, respondent: respondent} = session) do
+    {:stalled, session |> clear_token(), respondent}
+  end
+
+  def terminate(%{current_mode: %IVRMode{}, respondent: respondent}) do
+    {:failed, respondent}
+  end
+
+  def terminate(%{current_mode: %MobileWebMode{}, respondent: respondent} = session) do
+    {:stalled, session |> clear_token, respondent}
+  end
+
+  def switch_to_fallback_mode(%{fallback_mode: fallback_mode, flow: flow} = session) do
+    session = session |> clear_token
+    run_flow(%Session{
+      session |
+      current_mode: fallback_mode,
+      fallback_mode: nil,
+      channel_state: nil,
+      flow: %{
+        flow |
+        mode: fallback_mode |> SessionMode.mode
+      }
+    })
+  end
+
+  def consume_retry(%{current_mode: %{retries: [_ | retries]}} = session) do
+    %{session | current_mode: %{session.current_mode | retries: retries}}
+  end
+
+  def retry(session, runtime_channel, reason \\ "Timeout. Call failed.")
+
+  def retry(%{current_mode: %SMSMode{}} = session, runtime_channel, _) do
+    token = Ecto.UUID.generate
+
+    {:ok, _flow, reply} = Flow.retry(session.flow, TextVisitor.new("sms"))
+    log_prompts(reply, session.current_mode.channel, session.flow.mode, session.respondent)
+    respondent = runtime_channel |> Channel.ask(session.respondent, token, reply)
+    %{session | token: token, respondent: respondent}
+  end
+
+  def retry(%{schedule: schedule, current_mode: %IVRMode{}} = session, runtime_channel, reason) do
+    token = Ecto.UUID.generate
+
+    log_contact(reason, session.current_mode.channel, session.flow.mode, session.respondent)
+
+    next_available_date_time = schedule
+      |> Schedule.next_available_date_time
+
+    today_end_time = schedule
+      |> Schedule.at_end_time(next_available_date_time)
+
+    channel_state = runtime_channel
+      |> Channel.setup(session.respondent, token, next_available_date_time, today_end_time)
+      |> handle_setup_response()
+
+    %{session | channel_state: channel_state, token: token}
+  end
+
+  def retry(%{current_mode: %MobileWebMode{}} = session, runtime_channel, _) do
+    token = Ecto.UUID.generate
+
+    reply = mobile_contact_reply(session)
+    log_prompts(reply, session.current_mode.channel, session.flow.mode, session.respondent)
+    respondent = runtime_channel |> Channel.ask(session.respondent, token, reply)
+    %{session | token: token, respondent: respondent}
   end
 
   def channel_failed(%Session{current_mode: %{retries: []}, fallback_mode: nil} = session, reason) do
@@ -241,33 +312,21 @@ defmodule Ask.Runtime.Session do
     :ok
   end
 
-  def delivery_confirm(session, title, current_mode) do
-    log_confirmation(title, session.respondent.disposition, current_mode.channel, session.flow.mode, session.respondent)
-  end
-
-  defp switch_to_fallback(session) do
+  def contact_attempt_expired(session, reason) do
     runtime_channel = Ask.Channel.runtime_channel(session.current_mode.channel)
 
-    # Ff there's stil a queued message in the channel, don't fallback yet
-    if Channel.has_queued_message?(runtime_channel, session.channel_state) do
-      {:ok, session, %Reply{}, current_timeout(session), session.respondent}
-    else
-      do_switch_to_fallback(session)
-    end
+    session = retry(session, runtime_channel, reason)
+
+    next_available_date_time = session.schedule |> Schedule.next_available_date_time
+
+    base_timeout = Interval.new(from: DateTime.utc_now, until: next_available_date_time)
+      |> Interval.duration(:minutes)
+
+    {:ok, session, base_timeout + current_timeout(session)}
   end
 
-  defp do_switch_to_fallback(session) do
-    session = session |> clear_token
-    run_flow(%Session{
-      session |
-      current_mode: session.fallback_mode,
-      fallback_mode: nil,
-      channel_state: nil,
-      flow: %{
-        session.flow |
-        mode: session.fallback_mode |> SessionMode.mode
-      }
-    })
+  def delivery_confirm(session, title, current_mode) do
+    log_confirmation(title, session.respondent.disposition, current_mode.channel, session.flow.mode, session.respondent)
   end
 
   def sync_step(session, response) do
@@ -279,7 +338,6 @@ defmodule Ask.Runtime.Session do
     respondent = session.respondent
 
     if want_log_response do
-      # Log raw response from user including new disposition
       case step_answer do
         {:end, _, reply} -> log_response(response, current_mode.channel, session.flow.mode, respondent, Reply.disposition(reply))
         {:ok, _flow, reply} -> log_response(response, current_mode.channel, session.flow.mode, respondent, Reply.disposition(reply))
@@ -288,34 +346,19 @@ defmodule Ask.Runtime.Session do
       end
     end
 
-    survey = (respondent |> Repo.preload(:survey)).survey
-
-    # Get all quota buckets, if any
-    buckets =
-      case survey.quota_vars do
-        [] -> []
-        _ -> Repo.all(from q in QuotaBucket,
-               where: q.survey_id == ^survey.id)
-      end
-
-    # Store responses, assign respondent to bucket (if any, if there's a match)
-    # Since to determine the assigned bucket we need to get all responses,
-    # we return them here and reuse them in `falls_in_quota_already_completed`
-    # to avoid executing this query twice.
-    {respondent, responses} =
-      store_responses_and_assign_bucket(respondent, step_answer, buckets, session)
+    respondent = store_responses_and_assign_bucket(respondent, step_answer, session)
 
     session = %{session | respondent: respondent}
-    session |> handle_step_answer(step_answer, responses, buckets, current_mode)
+    session |> handle_step_answer(step_answer, current_mode)
   end
 
-  defp handle_step_answer(session, {:end, _, reply}, _, _, current_mode) do
+  defp handle_step_answer(session, {:end, _, reply}, current_mode) do
     log_prompts(reply, current_mode.channel, session.flow.mode, session.respondent, true)
     {:end, reply, session.respondent}
   end
 
-  defp handle_step_answer(session, {:ok, flow, reply}, responses, buckets, current_mode) do
-    case falls_in_quota_already_completed?(flow, buckets, responses) do
+  defp handle_step_answer(session, {:ok, flow, reply}, current_mode) do
+    case falls_in_quota_already_completed?(session.respondent, flow) do
       true ->
         session = Broker.update_respondent_disposition(session, "rejected")
 
@@ -330,7 +373,6 @@ defmodule Ask.Runtime.Session do
             _ ->
               {:rejected, session.respondent}
           end
-
         else
           {:rejected, session.respondent}
         end
@@ -340,7 +382,7 @@ defmodule Ask.Runtime.Session do
     end
   end
 
-  defp handle_step_answer(session, {:no_retries_left, flow, reply}, _, _, _) do
+  defp handle_step_answer(session, {:no_retries_left, flow, reply}, _) do
     case session do
       %{current_mode: %{retries: []}, fallback_mode: nil} ->
         {:failed, session.respondent}
@@ -349,7 +391,7 @@ defmodule Ask.Runtime.Session do
     end
   end
 
-  defp handle_step_answer(session, {:stopped, _, reply}, _, _, current_mode) do
+  defp handle_step_answer(session, {:stopped, _, reply}, current_mode) do
     log_response({:reply, "STOP"}, current_mode.channel, session.flow.mode, session.respondent, reply.disposition)
     {:stopped, reply, session.respondent}
   end
@@ -368,7 +410,8 @@ defmodule Ask.Runtime.Session do
       token: session.token,
       fallback_delay: session.fallback_delay,
       channel_state: session.channel_state,
-      count_partial_results: session.count_partial_results
+      count_partial_results: session.count_partial_results,
+      schedule: session.schedule |> Schedule.dump!
     }
   end
 
@@ -382,6 +425,7 @@ defmodule Ask.Runtime.Session do
       fallback_delay: state["fallback_delay"],
       channel_state: state["channel_state"],
       count_partial_results: state["count_partial_results"],
+      schedule: state["schedule"] |> Schedule.load!
     }
   end
 
@@ -398,8 +442,13 @@ defmodule Ask.Runtime.Session do
     end
   end
 
-  defp store_responses_and_assign_bucket(respondent, {_, _, reply}, buckets, session) do
-    # Add response to responses
+  defp store_responses_and_assign_bucket(respondent, {_, _, reply}, session) do
+    store_response(respondent, reply)
+
+    try_to_assign_bucket(respondent, session)
+  end
+
+  defp store_response(respondent, reply) do
     Reply.stores(reply) |> Enum.each(fn {field_name, value} ->
       existing_responses = respondent
       |> assoc(:responses)
@@ -412,85 +461,80 @@ defmodule Ask.Runtime.Session do
         |> Repo.insert
       end
     end)
-
-    # Try to assign a bucket to the respondent
-    assign_bucket(respondent, buckets, session)
   end
 
-  defp assign_bucket(respondent, [], _session) do
-    {respondent, nil}
+  defp try_to_assign_bucket(respondent, session) do
+    survey = (respondent |> Repo.preload(:survey)).survey
+
+    buckets =
+      case survey.quota_vars do
+        [] -> []
+        _ -> Repo.all(from q in QuotaBucket,
+               where: q.survey_id == ^survey.id)
+      end
+
+    try_to_assign_bucket(respondent, buckets, session)
   end
 
-  defp assign_bucket(respondent, buckets, session) do
-    # Nothing to do if the respondent already has a bucket
+  defp try_to_assign_bucket(respondent, [], _session) do
+    respondent
+  end
+
+  defp try_to_assign_bucket(respondent, buckets, session) do
     if respondent.quota_bucket_id do
-      {respondent, []}
+      respondent
     else
-      # Get respondent responses
-      responses = (respondent |> Repo.preload(:responses)).responses
-
-      # Convert them to list of {field_name, value}
-      responses = responses |> Enum.map(fn response ->
-          {response.field_name, response.value}
-        end) |> Enum.into([]) |> Enum.sort
-
-      # Check which bucket matches exactly those responses
-      buckets = buckets |> Enum.filter(fn bucket ->
-        bucket.condition |> Map.to_list |> Enum.all?(fn {key, value} ->
-          responses
-          |> Enum.filter(fn {response_key, _} -> response_key == key end)
-          |> Enum.all?(fn {_, response_value} ->
-            response_value |> QuotaBucket.matches_condition?(value)
-          end)
-        end)
-      end)
-
-      respondent =
-        case buckets do
-          [bucket] ->
-            respondent = respondent |> Respondent.changeset(%{quota_bucket_id: bucket.id}) |> Repo.update!
-            if (session.count_partial_results && respondent.disposition && respondent.disposition == "partial") || (respondent.disposition && respondent.disposition == "completed") do
-              from(q in QuotaBucket, where: q.id == ^bucket.id) |> Repo.update_all(inc: [count: 1])
-            end
-            respondent
-          _ ->
-            respondent
-        end
-
-      {respondent, responses}
+      respondent
+        |> sorted_responses()
+        |> buckets_matching_responses(buckets)
+        |> assign_bucket_if_one_match(respondent, session)
     end
   end
 
-  defp falls_in_quota_already_completed?(flow, buckets, responses) do
-    if flow.in_quota_completed_steps do
-      false
-    else
-      case buckets do
-        # No quotas: not completed
-        [] -> false
-        _ ->
-          # Filter buckets that contain each of the responses
-          buckets = responses |> Enum.reduce(buckets, fn(response, buckets) ->
-            {response_key, response_value} = response
-            buckets |> Enum.filter(fn bucket ->
-              # The response must be in the bucket, otherwise we keep the bucket
-              if bucket.condition |> Map.keys |> Enum.member?(response_key) do
-                bucket.condition |> Map.to_list |> Enum.any?(fn {key, value} ->
-                  key == response_key && (response_value |> QuotaBucket.matches_condition?(value))
-                end)
-              else
-                true
-              end
-            end)
-          end)
+  defp assign_bucket_if_one_match([bucket], respondent, session) do
+    respondent = respondent |> Respondent.changeset(%{quota_bucket_id: bucket.id}) |> Repo.update!
 
-          # The answer is: there it at least one bucket, and all of the buckets are full
-          case buckets do
-            [] -> false
-            _ ->
-              buckets |> Enum.all?(fn bucket -> bucket.count >= bucket.quota end)
-          end
-      end
+    if (session.count_partial_results && respondent.disposition && (respondent.disposition == "partial" || respondent.disposition == "interim partial")) || (respondent.disposition && respondent.disposition == "completed") do
+      from(q in QuotaBucket, where: q.id == ^bucket.id) |> Repo.update_all(inc: [count: 1])
+    end
+
+    respondent
+  end
+
+  defp assign_bucket_if_one_match(_buckets, respondent, _session) do
+    respondent
+  end
+
+  defp sorted_responses(respondent) do
+    (respondent |> Repo.preload(:responses)).responses
+      |> Enum.map(fn response ->
+        {response.field_name, response.value}
+      end) |> Enum.into([]) |> Enum.sort
+  end
+
+  defp buckets_matching_responses(responses, buckets) do
+    buckets |> Enum.filter(fn bucket ->
+      bucket.condition
+        |> Map.to_list
+        |> Enum.all?(fn {key, value} ->
+          responses = responses |> Enum.filter(fn {response_key, _} -> response_key == key end)
+          responses != []
+            && responses
+              |> Enum.all?(fn {_, response_value} ->
+                response_value
+                  |> QuotaBucket.matches_condition?(value)
+              end)
+        end)
+    end)
+  end
+
+  defp falls_in_quota_already_completed?(respondent, flow) do
+    cond do
+      flow.in_quota_completed_steps -> false
+      respondent.quota_bucket_id == nil -> false
+      true ->
+        bucket = (respondent |> Repo.preload(:quota_bucket)).quota_bucket
+        bucket.count >= bucket.quota
     end
   end
 end

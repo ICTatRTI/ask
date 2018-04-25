@@ -3,7 +3,8 @@ defmodule Ask.Runtime.Broker do
   use Timex
   import Ecto.Query
   import Ecto
-  alias Ask.{Repo, Survey, Respondent, RespondentDispositionHistory, RespondentGroup, QuotaBucket, Logger, Schedule}
+  require Ask.RespondentStats
+  alias Ask.{Repo, Survey, Respondent, RespondentStats, RespondentDispositionHistory, RespondentGroup, QuotaBucket, Logger, Schedule}
   alias Ask.Runtime.{Session, Reply, Flow, SessionMode, SessionModeProvider}
   alias Ask.QuotaBucket
 
@@ -88,6 +89,18 @@ defmodule Ask.Runtime.Broker do
     end
   end
 
+  def contact_attempt_expired(respondent, reason) do
+    session = respondent.session
+    if session do
+      response = session
+        |> Session.load
+        |> Session.contact_attempt_expired(reason)
+
+      update_respondent(respondent, response, nil)
+    end
+    :ok
+  end
+
   def delivery_confirm(respondent, title) do
     delivery_confirm(respondent, title, nil)
   end
@@ -95,7 +108,11 @@ defmodule Ask.Runtime.Broker do
   def delivery_confirm(respondent, title, mode) do
     unless respondent.session == nil do
       session = respondent.session |> Session.load
-      session_mode = session_mode(respondent, session, mode)
+      session_mode =
+        case session_mode(respondent, session, mode) do
+          :invalid_mode -> session.current_mode
+          mode -> mode
+        end
       Session.delivery_confirm(session, title, session_mode)
       update_respondent_disposition(session, "contacted")
     end
@@ -110,12 +127,9 @@ defmodule Ask.Runtime.Broker do
       "rejected" => 0,
       "failed" => 0,
     }
-    Repo.all(
-      from r in assoc(survey, :respondents),
-      group_by: :state,
-      select: {r.state, count("*")})
-      |> Enum.into(%{})
-      |> (&Map.merge(by_state_defaults, &1)).()
+
+    RespondentStats.respondent_count(survey_id: ^survey.id, by: :state)
+      |> Enum.into(by_state_defaults)
   end
 
   defp poll_survey(survey) do
@@ -200,6 +214,7 @@ defmodule Ask.Runtime.Broker do
         handle_session_step(Session.timeout(session))
       rescue
         e in Ecto.StaleEntryError ->
+          Logger.error(inspect e)
           # Maybe sync_step or another action was executed while the timeout was executed,
           # and that means the respondent reply, so we don't need to apply the timeout anymore
           Repo.rollback(e)
@@ -235,7 +250,7 @@ defmodule Ask.Runtime.Broker do
 
     fallback_delay = Survey.fallback_delay(survey) || Session.default_fallback_delay
 
-    handle_session_step(Session.start(questionnaire, respondent, primary_channel, primary_mode, retries, fallback_channel, fallback_mode, fallback_retries, fallback_delay, survey.count_partial_results))
+    handle_session_step(Session.start(questionnaire, respondent, primary_channel, primary_mode, survey.schedule, retries, fallback_channel, fallback_mode, fallback_retries, fallback_delay, survey.count_partial_results))
   end
 
   defp select_questionnaire_and_mode(%Survey{comparisons: []} = survey) do
@@ -331,6 +346,7 @@ defmodule Ask.Runtime.Broker do
             update_respondent_disposition(session, "started")
         end
 
+        reply = mask_phone_number(session.respondent, reply)
         handle_session_step(Session.sync_step(session, reply, session_mode))
       rescue
         e in Ecto.StaleEntryError ->
@@ -373,6 +389,42 @@ defmodule Ask.Runtime.Broker do
       value ->
         value
     end
+  end
+
+  def mask_phone_number(%Respondent{} = respondent, {:reply, response}) do
+    pii = respondent.sanitized_phone_number |> String.slice(-6..-1)
+    # pii can be empty if the sanitized_phone_number has less than 5 digits,
+    # that could be mostly to the case of a randomly generated phone number form a test
+    # String.contains? returns true for empty strings
+    masked_response = if String.length(pii) != 0 && contains_phone_number(response, pii) do
+      mask_phone_number(response, phone_number_matcher(pii), pii)
+    else
+      response
+    end
+
+    Flow.Message.reply(masked_response)
+  end
+  def mask_phone_number(_, reply), do: reply
+  def mask_phone_number(response, regex, pii) do
+    masked_response = response |> String.replace(regex, "\\1#\\3#\\5#\\7#\\9#\\11#\\13")
+
+    if contains_phone_number(masked_response, pii) do
+      mask_phone_number(masked_response, regex, pii)
+    else
+      masked_response
+    end
+  end
+
+  defp contains_phone_number(response, pii) do
+    String.contains?(Respondent.sanitize_phone_number(response), pii)
+  end
+
+  defp phone_number_matcher(pii) do
+    String.graphemes(pii)
+      |> Enum.reduce("(.*)", fn(digit, regex) ->
+        "#{regex}(#{digit})(.*)"
+      end)
+      |> Regex.compile!
   end
 
   defp handle_session_step({:ok, session, reply, timeout, respondent}) do
@@ -575,8 +627,8 @@ defmodule Ask.Runtime.Broker do
   end
 
   defp should_update_quota_bucket(new_disposition, old_disposition, true) do
-    (new_disposition != old_disposition && new_disposition == "partial")
-    || (new_disposition == "completed" && old_disposition != "partial" && old_disposition != "completed")
+    (new_disposition != old_disposition && new_disposition == "interim partial")
+    || (new_disposition == "completed" && old_disposition != "interim partial" && old_disposition != "completed")
   end
 
   defp should_update_quota_bucket(new_disposition, old_disposition, _) do

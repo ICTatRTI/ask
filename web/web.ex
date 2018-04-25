@@ -23,6 +23,8 @@ defmodule Ask.Web do
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
+
+      @timestamps_opts [type: :utc_datetime]
     end
   end
 
@@ -40,6 +42,8 @@ defmodule Ask.Web do
 
       import User.Helper
       import CSV.Helper
+      import Pagination.Helper
+      import Changeset.Helper
     end
   end
 

@@ -7,14 +7,17 @@ import uniq from 'lodash/uniq'
 import some from 'lodash/some'
 import each from 'lodash/each'
 import isEqual from 'lodash/isEqual'
-import { labelFor, iconFor } from '../../reducers/survey'
+import { modeLabel } from '../../questionnaire.mode'
+import { iconFor } from '../ui'
 import * as respondentActions from '../../actions/respondentGroups'
 import * as uiActions from '../../actions/ui'
 import { Input } from 'react-materialize'
 import { availableOptions, allOptions } from '../../surveyModes'
+import { translate } from 'react-i18next'
 
 class SurveyWizardModeStep extends Component {
   static propTypes = {
+    t: PropTypes.func,
     survey: PropTypes.object.isRequired,
     respondentGroups: PropTypes.object,
     questionnaires: PropTypes.object,
@@ -97,9 +100,17 @@ class SurveyWizardModeStep extends Component {
     return this.modeIncludes(survey.mode, mode)
   }
 
-  modeFromPrimaryAndFallback = (primary, fallback) => (
-    primary && !fallback ? [primary] : [primary, fallback]
-  )
+  modeFromPrimaryAndFallback = (primary, fallback) => {
+    if (primary && fallback) {
+      return [primary, fallback]
+    }
+
+    if (primary) {
+      return [primary]
+    }
+
+    return []
+  }
 
   selectPrimaryModeForComparison = (event) => {
     const { dispatch } = this.props
@@ -144,17 +155,18 @@ class SurveyWizardModeStep extends Component {
   )
 
   selectorForPrimaryMode = (comparison, primary, options, handler, readOnly) => {
+    const { t } = this.props
     const lastPrimary = this.comparisonPrimarySelectedIfLast()
     const selectorOptions = options.map((mode, index) => (
-      <option value={mode} key={mode + index}>{labelFor(mode)}</option>
+      <option value={mode} key={mode + index}>{modeLabel(mode)}</option>
     ))
     if (!primary) {
-      selectorOptions.unshift(<option value='' key='select-primary-mode'>Select primary mode</option>)
+      selectorOptions.unshift(<option value='' key='select-primary-mode'>{t('Select primary mode')}</option>)
     }
     if (lastPrimary && comparison) {
       return (
         <Input s={12} m={5} type='select' value={lastPrimary} disabled={readOnly} onChange={handler}>
-          <option value={lastPrimary} key={lastPrimary}>{labelFor(lastPrimary)}</option>
+          <option value={lastPrimary} key={lastPrimary}>{modeLabel(lastPrimary)}</option>
         </Input>
       )
     } else {
@@ -167,19 +179,20 @@ class SurveyWizardModeStep extends Component {
   }
 
   selectorForFallbackMode = (comparison, primary, fallback, options, handler, readOnly) => {
+    const { t } = this.props
     const lastFallback = this.comparisonFallbackSelectedIfLast(primary, comparison)
     if (lastFallback) {
       return (
         <Input s={12} m={5} type='select' value={lastFallback} disabled={readOnly} onChange={handler}>
-          <option value={lastFallback} key={lastFallback}>{labelFor(lastFallback)}</option>
+          <option value={lastFallback} key={lastFallback}>{modeLabel(lastFallback)}</option>
         </Input>
       )
     } else {
       return (
         <Input s={12} m={5} type='select' value={fallback || ''} disabled={readOnly} onChange={handler}>
-          {<option value=''>No fallback</option>}
+          {<option value=''>{t('No fallback')}</option>}
           {options.map((mode, index) => {
-            return <option value={mode} key={mode + index}>{labelFor(mode)}</option>
+            return <option value={mode} key={mode + index}>{modeLabel(mode)}</option>
           })}
         </Input>
       )
@@ -187,10 +200,10 @@ class SurveyWizardModeStep extends Component {
   }
 
   render() {
-    const { survey, readOnly, comparisonModes } = this.props
+    const { survey, readOnly, comparisonModes, t } = this.props
 
     if (!survey) {
-      return <div>Loading...</div>
+      return <div>{t('Loading...')}</div>
     }
 
     const mode = survey.mode || []
@@ -216,11 +229,11 @@ class SurveyWizardModeStep extends Component {
         return (<tr key={'row' + mode[0] + mode[1]}>
           <td>
             {iconFor(mode[0])}
-            {labelFor(mode[0])}
+            {modeLabel(mode[0])}
           </td>
           <td>
             {mode[1] ? iconFor(mode[1]) : null}
-            {mode[1] ? labelFor(mode[1]) : 'No fallback'}
+            {mode[1] ? modeLabel(mode[1]) : 'No fallback'}
           </td>
           <td className='tdDelete'>
             {
@@ -263,10 +276,8 @@ class SurveyWizardModeStep extends Component {
       <div>
         <div className='row'>
           <div className='col s12'>
-            <h4>Select mode</h4>
-            <p className='flow-text'>
-              Select which modes you want to use.
-            </p>
+            <h4>{t('Select mode')}</h4>
+            <p className='flow-text'>{t('Select which modes you want to use.')}</p>
           </div>
         </div>
         <div className='row'>
@@ -279,7 +290,7 @@ class SurveyWizardModeStep extends Component {
               className='filled-in'
               disabled={readOnly}
               />
-            <label htmlFor='questionnaire_mode_comparison'>Run a comparison to contrast performance between different primary and fallback modes combinations (you can set up the allocations later in the comparisons section)</label>
+            <label htmlFor='questionnaire_mode_comparison'>{t('Run a comparison to contrast performance between different primary and fallback modes combinations (you can set up the allocations later in the comparisons section)')}</label>
           </div>
         </div>
         <div className='row'>
@@ -289,8 +300,8 @@ class SurveyWizardModeStep extends Component {
                 <table className='highlight'>
                   <thead>
                     <tr>
-                      <th>Primary mode</th>
-                      <th>Fallback mode</th>
+                      <th>{t('Primary mode')}</th>
+                      <th>{t('Fallback mode')}</th>
                       <th />
                     </tr>
                   </thead>
@@ -312,4 +323,4 @@ const mapStateToProps = (state) => ({
   comparisonModes: state.ui.data.surveyWizard
 })
 
-export default connect(mapStateToProps)(SurveyWizardModeStep)
+export default translate()(connect(mapStateToProps)(SurveyWizardModeStep))

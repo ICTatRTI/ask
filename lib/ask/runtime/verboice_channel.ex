@@ -1,18 +1,19 @@
 defmodule Ask.Runtime.VerboiceChannel do
   alias __MODULE__
   use Ask.Web, :model
-  alias Ask.{Repo, Respondent, Channel}
+  alias Ask.{Repo, Respondent, Channel, Stats}
   alias Ask.Runtime.{Broker, Flow, Reply}
   alias Ask.Router.Helpers
   import Plug.Conn
   import XmlBuilder
   @behaviour Ask.Runtime.ChannelProvider
-  defstruct [:client, :channel_name]
+  defstruct [:client, :channel_name, :channel_id]
 
   def new(channel) do
     channel_name = channel.settings["verboice_channel"]
+    channel_id = channel.settings["verboice_channel_id"]
     client = create_client(channel.user_id, channel.base_url)
-    %VerboiceChannel{client: client, channel_name: channel_name}
+    %VerboiceChannel{client: client, channel_name: channel_name, channel_id: channel_id}
   end
 
   def oauth2_authorize(code, redirect_uri, base_url) do
@@ -85,7 +86,7 @@ defmodule Ask.Runtime.VerboiceChannel do
     [say_or_play(prompt) | say_or_play(prompts)]
   end
 
-  def say_or_play(%{"audio_source" => "upload", "audio_id" => audio_id}) do
+  def say_or_play(%{"audio_source" => audio_source, "audio_id" => audio_id}) when audio_source in ["upload", "record"] do
     element(:Play, Helpers.audio_delivery_url(Ask.Endpoint, :show, audio_id))
   end
 
@@ -121,26 +122,67 @@ defmodule Ask.Runtime.VerboiceChannel do
     end
   end
 
-  def sync_channels(user_id, base_url, channel_names) do
+  def sync_channels(user_id, base_url, api_channels) do
     user = Ask.User |> Repo.get!(user_id)
-    channels = user |> assoc(:channels) |> where([c], c.provider == "verboice" and c.base_url == ^base_url) |> Repo.all
+    channels =
+      user
+      |> assoc(:channels)
+      |> where([c], c.provider == "verboice" and c.base_url == ^base_url)
+      |> Repo.all()
 
     channels |> Enum.each(fn channel ->
-      exists = channel_names |> Enum.any?(fn name -> channel.settings["verboice_channel"] == name end)
+      exists =
+        api_channels
+        |> Enum.any?(&match_channel(channel, &1))
+
       if !exists do
         Ask.Channel.delete(channel)
       end
     end)
 
-    channel_names |> Enum.each(fn name ->
-      exists = channels |> Enum.any?(fn channel -> channel.settings["verboice_channel"] == name end)
-      if !exists do
-        user
-        |> Ecto.build_assoc(:channels)
-        |> Channel.changeset(%{name: name, type: "ivr", provider: "verboice", base_url: base_url, settings: %{"verboice_channel" => name}})
-        |> Repo.insert
-      end
+    api_channels |> Enum.each(fn api_channel ->
+      channel =
+        channels
+        |> Enum.find(&match_channel(&1, api_channel))
+
+      channel =
+        if channel do
+          channel
+        else
+          user
+          |> Ecto.build_assoc(:channels)
+        end
+
+      settings = %{
+        "verboice_channel" => api_channel["name"],
+        "verboice_channel_id" => api_channel["id"]
+      }
+
+      settings =
+        if api_channel["shared_by"] do
+          settings |> Map.put("shared_by", api_channel["shared_by"])
+        else
+          settings
+        end
+
+      channel
+      |> Channel.changeset(%{
+        name: api_channel["name"],
+        type: "ivr",
+        provider: "verboice",
+        base_url: base_url,
+        settings: settings
+      })
+      |> Repo.insert_or_update!()
     end)
+  end
+
+  defp match_channel(%{settings: %{"verboice_channel_id" => id}}, %{"id" => id}), do: true
+  defp match_channel(%{settings: %{"verboice_channel" => name}}, %{"name" => name}), do: true
+  defp match_channel(_, _), do: false
+
+  defp channel_failed(respondent, "expired", _) do
+    Broker.contact_attempt_expired(respondent, "Call expired, will be retried in next schedule window")
   end
 
   defp channel_failed(respondent, "failed", %{"CallStatusReason" => "Busy", "CallStatusCode" => code}) do
@@ -179,10 +221,34 @@ defmodule Ask.Runtime.VerboiceChannel do
     Broker.channel_failed(respondent, status)
   end
 
+  def update_interactions(respondent) do
+    respondent = Respondent
+    |> Repo.get(respondent.id)
+
+    stats = respondent.stats
+    |> Stats.set_interaction_time(DateTime.utc_now())
+
+    respondent
+    |> Respondent.changeset(%{stats: stats})
+    |> Repo.update!
+  end
+
+  def update_call_time(respondent) do
+    respondent = Respondent
+    |> Repo.get(respondent.id)
+
+    stats = respondent.stats
+    |> Stats.add_total_call_time()
+
+    respondent
+    |> Respondent.changeset(%{stats: stats})
+    |> Repo.update!
+  end
+
   def callback(conn, %{"path" => ["status", respondent_id, _token], "CallStatus" => status} = params) do
     respondent = Repo.get!(Respondent, respondent_id)
     case status do
-      s when s in ["failed", "busy", "no-answer"] ->
+      s when s in ["failed", "busy", "no-answer", "expired"] ->
         channel_failed(respondent, status, params)
       _ -> :ok
     end
@@ -204,9 +270,11 @@ defmodule Ask.Runtime.VerboiceChannel do
       _ ->
         response = case params["Digits"] do
           nil -> Flow.Message.answer()
-          "timeout" -> Flow.Message.no_reply
+          "timeout" -> Flow.Message.no_reply()
           digits -> Flow.Message.reply(digits)
         end
+
+        update_interactions(respondent)
 
         case broker.sync_step(respondent, response, "ivr") do
           {:reply, reply} ->
@@ -215,8 +283,10 @@ defmodule Ask.Runtime.VerboiceChannel do
             gather(respondent, prompts, num_digits)
           {:end, {:reply, reply}} ->
             prompts = Reply.prompts(reply)
+            update_call_time(respondent)
             say_or_play(prompts) ++ [hangup()]
           :end ->
+            update_call_time(respondent)
             hangup()
         end
     end
@@ -261,12 +331,24 @@ defmodule Ask.Runtime.VerboiceChannel do
     def ask(_, _, _, _), do: throw(:not_implemented)
     def prepare(_, _), do: :ok
 
-    def setup(channel, respondent, token) do
+    def setup(channel, respondent, token, not_before, not_after) do
+      params = [
+        address: respondent.sanitized_phone_number,
+        callback_url: VerboiceChannel.callback_url(respondent),
+        status_callback_url: VerboiceChannel.status_callback_url(respondent, token),
+        not_before: not_before,
+        not_after: not_after
+      ]
+
+      params =
+        if channel.channel_id do
+          Keyword.put(params, :channel_id, channel.channel_id)
+        else
+          Keyword.put(params, :channel, channel.channel_name)
+        end
+
       channel.client
-      |> Verboice.Client.call(address: respondent.sanitized_phone_number,
-                              channel: channel.channel_name,
-                              callback_url: VerboiceChannel.callback_url(respondent),
-                              status_callback_url: VerboiceChannel.status_callback_url(respondent, token))
+      |> Verboice.Client.call(params)
       |> Ask.Runtime.VerboiceChannel.process_call_response
     end
 
@@ -282,6 +364,18 @@ defmodule Ask.Runtime.VerboiceChannel do
       end
     end
     def has_queued_message?(_, _) do
+      false
+    end
+
+    def message_expired?(channel, %{"verboice_call_id" => call_id}) do
+      response = channel.client
+      |> Verboice.Client.call_state(call_id)
+      case response do
+        {:ok, %{"state" => "expired"}} -> true
+        _ -> false
+      end
+    end
+    def message_expired?(_, _) do
       false
     end
 

@@ -4,8 +4,10 @@ export type Store = {
   questionnaires: QuestionnaireList,
   survey: DataStore<Survey>,
   surveys: SurveyList,
+  channel: Channel,
   channels: ChannelList,
-  projects: ProjectList
+  projects: ProjectList,
+  integrations: IndexedList<Integration>
 };
 
 export type DataStore<T> = {
@@ -35,11 +37,14 @@ export type ValidationError = {
 export type Filter = {
   id?: ?number,
   projectId?: number,
+  archived?: ?boolean
 };
 
 export type Action = {
   type: string
 };
+
+export type DirtyPredicate<T> = (action: Action, oldData: ?DataStore<T>, newData: ?DataStore<T>) => boolean;
 
 export type FilteredAction = Action & Filter;
 
@@ -76,6 +81,10 @@ export type ListFilter = {
   projectId: ?number,
 }
 
+export type ArchiveFilter = {
+  archived: ?boolean
+};
+
 export type SurveyList = ListStore<Survey> & {
   filter: ?ListFilter,
 };
@@ -86,4 +95,6 @@ export type QuestionnaireList = ListStore<Questionnaire> & {
 
 export type ChannelList = ListStore<Channel>;
 
-export type ProjectList = ListStore<Project>;
+export type ProjectList = ListStore<Project> & {
+  filter: ?ArchiveFilter,
+};

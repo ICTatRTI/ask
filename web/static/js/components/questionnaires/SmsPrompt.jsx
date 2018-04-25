@@ -3,6 +3,10 @@ import Draft from './Draft'
 import { splitSmsText, joinSmsPieces } from '../../step'
 import {limitExceeded} from '../../characterCounter'
 import filter from 'lodash/filter'
+import map from 'lodash/map'
+import { translate } from 'react-i18next'
+
+const k = (...args: any) => args
 
 class SmsPrompt extends Component {
   onBlur() {
@@ -48,24 +52,23 @@ class SmsPrompt extends Component {
   }
 
   renderSmsInput(total, index, value) {
-    const { inputErrors, readOnly, fixedEndLength } = this.props
+    let { inputErrors, readOnly, fixedEndLength, label, t } = this.props
 
     const shouldDisplayReducerErrors = (value == this.props.originalValue)
-    const reducerErrors = filter(inputErrors, (err) => err !== 'limit exceeded')
+    const reducerErrors = filter(inputErrors, (err) => err !== t('limit exceeded'))
 
     let errors = []
     if (shouldDisplayReducerErrors) {
       errors.push(...reducerErrors)
     }
     if (limitExceeded(value)) {
-      errors.push('SMS is too long. Use SHIFT+ENTER to split in multiple parts')
+      errors.push(k('SMS is too long. Use SHIFT+ENTER to split in multiple parts'))
     }
     if (errors.length == 0) {
       errors = null
     }
 
-    let { label } = this.props
-    if (!label) label = 'SMS message'
+    if (!label) label = t('SMS message')
 
     const labelComponent = total == 1 ? label : `${label} (part ${index + 1})`
     const last = index + 1 == total
@@ -86,7 +89,7 @@ class SmsPrompt extends Component {
           label={labelComponent}
           value={value}
           readOnly={readOnly}
-          errors={errors}
+          errors={map(errors, (error) => t(...error))}
           onSplit={caretIndex => this.splitPiece(caretIndex, index)}
           onBlur={e => this.onBlur()}
           characterCounter
@@ -142,6 +145,7 @@ class SmsPrompt extends Component {
 }
 
 SmsPrompt.propTypes = {
+  t: PropTypes.func,
   id: PropTypes.string.isRequired,
   label: PropTypes.string,
   originalValue: PropTypes.string.isRequired,
@@ -154,4 +158,4 @@ SmsPrompt.propTypes = {
   autocompleteGetData: PropTypes.func,
   autocompleteOnSelect: PropTypes.func}
 
-export default SmsPrompt
+export default translate()(SmsPrompt)

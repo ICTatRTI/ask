@@ -167,6 +167,238 @@ describe('questionnaire reducer', () => {
     })
   })
 
+  describe('undo/redo', () => {
+    it('has a sane initial state', () => {
+      expect(initialState.undo).toEqual([])
+      expect(initialState.redo).toEqual([])
+    })
+
+    it('should start with empty undo/redo stacks', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire)
+      ])
+
+      expect(result.undo).toEqual([])
+      expect(result.redo).toEqual([])
+    })
+
+    it('stores undo history', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.changeName('Name 2')
+      ])
+
+      expect(result.data.name).toEqual('Name 2')
+      expect(result.undo.length).toEqual(2)
+      expect(result.undo[0].name).toEqual('Name 1')
+      expect(result.undo[1].name).toEqual(questionnaire.name)
+    })
+
+    it('undoes change', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.changeName('Name 2'),
+        actions.undo()
+      ])
+
+      expect(result.data.name).toEqual('Name 1')
+      expect(result.undo.length).toEqual(1)
+      expect(result.undo[0].name).toEqual(questionnaire.name)
+    })
+
+    it('saves redo states when undoing', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.changeName('Name 2'),
+        actions.undo(),
+        actions.undo()
+      ])
+
+      expect(result.data.name).toEqual(questionnaire.name)
+      expect(result.undo).toEqual([])
+      expect(result.redo.length).toEqual(2)
+      expect(result.redo[0].name).toEqual('Name 1')
+      expect(result.redo[1].name).toEqual('Name 2')
+    })
+
+    it('redoes changes', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.changeName('Name 2'),
+        actions.undo(),
+        actions.undo(),
+        actions.redo(),
+        actions.redo()
+      ])
+
+      expect(result.data.name).toEqual('Name 2')
+      expect(result.undo.length).toEqual(2)
+      expect(result.undo[0].name).toEqual('Name 1')
+      expect(result.undo[1].name).toEqual(questionnaire.name)
+    })
+
+    it('making change clears the redo stack', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.changeName('Name 2'),
+        actions.undo(),
+        actions.changeName('Name 3')
+      ])
+
+      expect(result.data.name).toEqual('Name 3')
+      expect(result.undo.length).toEqual(2)
+      expect(result.undo[0].name).toEqual('Name 1')
+      expect(result.undo[1].name).toEqual(questionnaire.name)
+      expect(result.redo).toEqual([])
+    })
+
+    it('undoing a change sets dirty flag', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.saving(),
+        actions.saved(),
+        actions.undo()
+      ])
+
+      expect(result.dirty).toEqual(true)
+    })
+
+    it('redoing a change sets dirty flag', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.undo(),
+        actions.saving(),
+        actions.saved(),
+        actions.redo()
+      ])
+
+      expect(result.dirty).toEqual(true)
+    })
+
+    it('does nothing if there is no undo history', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.undo()
+      ])
+
+      expect(result.data.name).toEqual(questionnaire.name)
+    })
+
+    it('does nothing if there is no redo history', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.redo()
+      ])
+
+      expect(result.data.name).toEqual(questionnaire.name)
+    })
+
+    it('does not add extra items to undo/redo stack when saving', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeName('Name 1'),
+        actions.saving(),
+        actions.undo(),
+        actions.saved()
+      ])
+
+      expect(result.undo.length).toEqual(0)
+      expect(result.redo.length).toEqual(1)
+    })
+
+    it('runs validations after undo', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeStepPromptSms('b6588daa-cd81-40b1-8cac-ff2e72a15c15', ''),
+        actions.undo()
+      ])
+
+      expect(result.errors).toExclude({
+        path: "steps[1].prompt['en'].sms",
+        lang: 'en',
+        mode: 'sms',
+        message: ['SMS prompt must not be blank']
+      })
+    })
+
+    it('runs validations after redo', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.changeStepPromptSms('b6588daa-cd81-40b1-8cac-ff2e72a15c15', ''),
+        actions.undo(),
+        actions.redo()
+      ])
+
+      expect(result.errors).toInclude({
+        path: "steps[1].prompt['en'].sms",
+        lang: 'en',
+        mode: 'sms',
+        message: ['SMS prompt must not be blank']
+      })
+    })
+
+    it('does not add undo history when switching modes', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.setActiveMode('ivr')
+      ])
+
+      expect(result.undo.length).toEqual(0)
+    })
+
+    it('does not add undo history when switching languages', () => {
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.setActiveLanguage('es')
+      ])
+
+      expect(result.undo.length).toEqual(0)
+    })
+
+    it('can undo questionnaire settings changes', () => {
+      const q = {...questionnaire,
+        settings: {...questionnaire.settings,
+          errorMessage: {
+            en: {
+              sms: 'error'
+            }
+          }
+        }
+      }
+
+      const result = playActions([
+        actions.fetch(1, 1),
+        actions.receive(q),
+        actions.setSmsQuestionnaireMsg('errorMessage', 'another error'),
+        actions.undo()
+      ])
+
+      expect(result.data.settings.errorMessage['en'].sms).toEqual('error')
+    })
+  })
+
   describe('modes', () => {
     it('should add mode', () => {
       const result = playActions([
@@ -528,19 +760,19 @@ describe('questionnaire reducer', () => {
         path: "steps[1].prompt['en'].sms",
         lang: 'en',
         mode: 'sms',
-        message: 'SMS prompt must not be blank'
+        message: ['SMS prompt must not be blank']
       })
 
       expect(errors).toInclude({
         path: "steps[1].prompt['fr'].sms",
         lang: 'fr',
         mode: 'sms',
-        message: 'SMS prompt must not be blank'
+        message: ['SMS prompt must not be blank']
       })
 
       expect(resultState.errorsByPath).toInclude({
-        "steps[1].prompt['en'].sms": ['SMS prompt must not be blank'],
-        "steps[1].prompt['fr'].sms": ['SMS prompt must not be blank']
+        "steps[1].prompt['en'].sms": [['SMS prompt must not be blank']],
+        "steps[1].prompt['fr'].sms": [['SMS prompt must not be blank']]
       })
 
       expect(resultState.errorsByLang).toInclude({
@@ -561,7 +793,7 @@ describe('questionnaire reducer', () => {
         path: "steps[0].prompt['en'].mobileweb",
         lang: 'en',
         mode: 'mobileweb',
-        message: 'Mobile web prompt must not be blank'
+        message: ['Mobile web prompt must not be blank']
       })
     })
 
@@ -607,7 +839,7 @@ describe('questionnaire reducer', () => {
       ])
 
       expect(resultState.errors).toExclude({
-        [`steps[0].prompt['en'].sms`]: ['SMS prompt is too long']
+        [`steps[0].prompt['en'].sms`]: [['SMS prompt is too long']]
       })
     })
 
@@ -648,13 +880,13 @@ describe('questionnaire reducer', () => {
         path: "steps[1].prompt['en'].ivr.text",
         lang: 'en',
         mode: 'ivr',
-        message: 'Voice prompt must not be blank'
+        message: ['Voice prompt must not be blank']
       })
       expect(errors).toInclude({
         path: "steps[1].prompt['fr'].ivr.text",
         lang: 'fr',
         mode: 'ivr',
-        message: 'Voice prompt must not be blank'
+        message: ['Voice prompt must not be blank']
       })
     })
 
@@ -669,7 +901,7 @@ describe('questionnaire reducer', () => {
         path: "steps[1].prompt['en'].ivr.audioId",
         lang: 'en',
         mode: 'ivr',
-        message: 'An audio file must be uploaded'
+        message: ['An audio file must be uploaded']
       })
     })
 
@@ -686,7 +918,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].choices',
         lang: null,
         mode: null,
-        message: 'You should define at least two response options'
+        message: ['You should define at least two response options']
       })
     })
 
@@ -702,7 +934,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].choices[0].value',
         lang: null,
         mode: null,
-        message: 'Response must not be blank'
+        message: ['Response must not be blank']
       })
     })
 
@@ -725,14 +957,14 @@ describe('questionnaire reducer', () => {
         path: "steps[1].choices[0]['en'].sms",
         lang: 'en',
         mode: 'sms',
-        message: 'SMS must not be blank'
+        message: ['"SMS" must not be blank']
       })
 
       expect(errors).toInclude({
         path: "steps[1].choices[0]['fr'].sms",
         lang: 'fr',
         mode: 'sms',
-        message: 'SMS must not be blank'
+        message: ['"SMS" must not be blank']
       })
     })
 
@@ -755,13 +987,13 @@ describe('questionnaire reducer', () => {
         path: "steps[1].choices[0]['en'].sms",
         lang: 'en',
         mode: 'sms',
-        message: "SMS must not be 'STOP'"
+        message: ['"SMS" cannot be "STOP"']
       })
       expect(errors).toInclude({
         path: "steps[1].choices[0]['fr'].sms",
         lang: 'fr',
         mode: 'sms',
-        message: "SMS must not be 'STOP'"
+        message: ['"SMS" cannot be "STOP"']
       })
     })
 
@@ -777,7 +1009,7 @@ describe('questionnaire reducer', () => {
         path: "steps[0].choices[0]['en'].mobileweb",
         lang: 'en',
         mode: 'mobileweb',
-        message: 'Mobile web must not be blank'
+        message: ['"Mobile web" must not be blank']
       })
     })
 
@@ -799,7 +1031,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[1].choices[0].ivr',
         lang: null,
         mode: 'ivr',
-        message: '"Phone call" must not be blank'
+        message: ['"Phone call" must not be blank']
       })
     })
 
@@ -839,13 +1071,13 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].choices[1].ivr',
         lang: null,
         mode: 'ivr',
-        message: '"Phone call" must only consist of single digits, "#" or "*"'
+        message: ['"Phone call" must only consist of single digits, "#" or "*"']
       })
       expect(errors).toInclude({
         path: 'steps[1].choices[2].ivr',
         lang: null,
         mode: 'ivr',
-        message: '"Phone call" must only consist of single digits, "#" or "*"'
+        message: ['"Phone call" must only consist of single digits, "#" or "*"']
       })
     })
 
@@ -862,7 +1094,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].choices[1].value',
         lang: null,
         mode: null,
-        message: 'Value already used in a previous response'
+        message: ['Value already used in a previous response']
       })
     })
 
@@ -879,7 +1111,7 @@ describe('questionnaire reducer', () => {
         path: "steps[0].choices[1]['en'].sms",
         lang: 'en',
         mode: 'sms',
-        message: 'Value "c" already used in a previous response'
+        message: ['Value "{{value}}" already used in a previous response', {value: 'c'}]
       })
     })
 
@@ -911,7 +1143,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].choices[1].ivr',
         lang: null,
         mode: 'ivr',
-        message: 'Value "2" already used in a previous response'
+        message: ['Value "{{value}}" already used in a previous response', {value: '2'}]
       })
     })
 
@@ -926,7 +1158,7 @@ describe('questionnaire reducer', () => {
       ])
 
       expect(resultState.errors).toNotInclude({
-        'steps[0].choices[1].ivr': ['Value "2" already used in a previous response']
+        'steps[0].choices[1].ivr': [['Value "{{value}}" already used in a previous response', {value: 2}]]
       })
     })
 
@@ -943,7 +1175,7 @@ describe('questionnaire reducer', () => {
         path: "steps[0].choices[1]['en'].mobileweb",
         lang: 'en',
         mode: 'mobileweb',
-        message: 'Value "b" already used in a previous response'
+        message: ['Value "{{value}}" already used in a previous response', {value: 'b'}]
       })
     })
 
@@ -958,7 +1190,7 @@ describe('questionnaire reducer', () => {
         path: "errorMessage.prompt['en'].sms",
         lang: 'en',
         mode: 'sms',
-        message: 'SMS prompt must not be blank'
+        message: ['SMS prompt must not be blank']
       })
     })
 
@@ -973,7 +1205,7 @@ describe('questionnaire reducer', () => {
         path: `errorMessage.prompt['en'].ivr.text`,
         lang: 'en',
         mode: 'ivr',
-        message: 'Voice prompt must not be blank'
+        message: ['Voice prompt must not be blank']
       })
     })
 
@@ -1002,19 +1234,19 @@ describe('questionnaire reducer', () => {
         path: 'steps[0].prompt.sms',
         lang: null,
         mode: 'sms',
-        message: 'SMS prompt must not be blank'
+        message: ['SMS prompt must not be blank']
       })
       expect(errors).toInclude({
         path: 'steps[0].prompt.ivr.text',
         lang: null,
         mode: 'ivr',
-        message: 'Voice prompt must not be blank'
+        message: ['Voice prompt must not be blank']
       })
       expect(errors).toInclude({
         path: 'steps[0].prompt.mobileweb',
         lang: null,
         mode: 'mobileweb',
-        message: 'Mobile web prompt must not be blank'
+        message: ['Mobile web prompt must not be blank']
       })
     })
 
@@ -1029,7 +1261,7 @@ describe('questionnaire reducer', () => {
         path: `title['en']`,
         lang: 'en',
         mode: 'mobileweb',
-        message: 'Title must not be blank'
+        message: ['Title must not be blank']
       })
 
       const newState = playActionsFromState(state, reducer)([
@@ -1040,7 +1272,7 @@ describe('questionnaire reducer', () => {
         path: `title['en']`,
         lang: 'en',
         mode: 'mobileweb',
-        message: 'Title must not be blank'
+        message: ['Title must not be blank']
       })
     })
 
@@ -1055,7 +1287,7 @@ describe('questionnaire reducer', () => {
         path: `surveyAlreadyTakenMessage['en']`,
         lang: 'en',
         mode: 'mobileweb',
-        message: '"Survey already taken" message must not be blank'
+        message: ['"Survey already taken" message must not be blank']
       })
 
       const newState = playActionsFromState(state, reducer)([
@@ -1066,7 +1298,7 @@ describe('questionnaire reducer', () => {
         path: `surveyAlreadyTakenMessage['en['en']`,
         lang: 'en',
         mode: 'mobileweb',
-        message: '"Survey already taken" message must not be blank'
+        message: ['"Survey already taken" message must not be blank']
       })
     })
 
@@ -1082,7 +1314,7 @@ describe('questionnaire reducer', () => {
         path: 'steps[1].store',
         lang: null,
         mode: null,
-        message: 'Variable already used in a previous step'
+        message: ['Variable already used in a previous step']
       })
     })
 
@@ -1106,7 +1338,7 @@ describe('questionnaire reducer', () => {
         path: `steps[${i}].maxValue`,
         lang: null,
         mode: null,
-        message: 'Max value must be greater than the min value'
+        message: ['Max value must be greater than the min value']
       })
     })
 
@@ -1130,7 +1362,7 @@ describe('questionnaire reducer', () => {
         path: `steps[${i}].rangesDelimiters`,
         lang: null,
         mode: null,
-        message: "Delimiter 'a' must be a number"
+        message: ['Delimiter "{{delimiter}}" must be a number', {delimiter: 'a'}]
       })
     })
 
@@ -1154,7 +1386,7 @@ describe('questionnaire reducer', () => {
         path: `steps[${i}].rangesDelimiters`,
         lang: null,
         mode: null,
-        message: 'Delimiter 5 must be greater than the previous one (10)'
+        message: ['Delimiter {{delimiter}} must be greater than the previous one ({{previous}})', {delimiter: '5', previous: 10}]
       })
     })
 
@@ -1178,7 +1410,7 @@ describe('questionnaire reducer', () => {
         path: `steps[${i}].minValue`,
         lang: null,
         mode: null,
-        message: 'Min value must be less than or equal to the first delimiter (5)'
+        message: ['Min value must be less than or equal to the first delimiter ({{first}})', {first: 5}]
       })
     })
 
@@ -1202,7 +1434,7 @@ describe('questionnaire reducer', () => {
         path: `steps[${i}].maxValue`,
         lang: null,
         mode: null,
-        message: 'Max value must be greater than or equal to the last delimiter (20)'
+        message: ['Max value must be greater than or equal to the last delimiter ({{last}})', {last: 20}]
       })
     })
   })
@@ -1317,11 +1549,30 @@ describe('questionnaire reducer', () => {
       const newStep = state.data.steps[state.data.steps.length - 1]
 
       const finalState = playActionsFromState(state, reducer)([
-        actions.changeStepAudioIdIvr(newStep.id, '1234')]
+        actions.changeStepAudioIdIvr(newStep.id, '1234', 'upload')]
       )
 
       const step = find(finalState.data.steps, s => s.id === newStep.id)
       expect(step.prompt['es'].ivr).toEqual({text: '', audioId: '1234', audioSource: 'upload'})
+    })
+
+    it('should update step audioId from a recording on a new step', () => {
+      const state = playActions([
+        actions.fetch(1, 1),
+        actions.receive(questionnaire),
+        actions.addLanguage('es'),
+        actions.setDefaultLanguage('es'),
+        actions.addStep()
+      ])
+
+      const newStep = state.data.steps[state.data.steps.length - 1]
+
+      const finalState = playActionsFromState(state, reducer)([
+        actions.changeStepAudioIdIvr(newStep.id, '1234', 'record')]
+      )
+
+      const step = find(finalState.data.steps, s => s.id === newStep.id)
+      expect(step.prompt['es'].ivr).toEqual({text: '', audioId: '1234', audioSource: 'record'})
     })
 
     it('should add a new language last inside the choices of the language selection step', () => {

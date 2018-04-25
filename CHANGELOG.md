@@ -1,5 +1,122 @@
 # InSTEDD Surveda Changelog
 
+## Pine 0.16
+
+### Features
+
+* Localized UI (with translations in French and Spanish) [#1217](https://github.com/instedd/ask/issues/1217)
+* Archive projects [#1216](https://github.com/instedd/ask/issues/1216)
+* Autosave improvements [#1224](https://github.com/instedd/ask/issues/1224), [#1225](https://github.com/instedd/ask/issues/1225), [#1226](https://github.com/instedd/ask/issues/1226)
+* New survey cockpit [#1218](https://github.com/instedd/ask/issues/1218)
+* Record voice messages in the browser [#1223](https://github.com/instedd/ask/issues/1223)
+* Activity log [#1227](https://github.com/instedd/ask/issues/1227)
+* Undo/Redo in the questionnaire editor [#1253](https://github.com/instedd/ask/issues/1253)
+* Share channels with projects [#1248](https://github.com/instedd/ask/issues/1248), [#1249](https://github.com/instedd/ask/issues/1249)
+
+### Bugfixes
+
+* Avoid deletion of respondent groups when the survey is already running [#1203](https://github.com/instedd/ask/issues/1203)
+* Synchronize Verboice shared channels [#1219](https://github.com/instedd/ask/issues/1219)
+
+## Oak 0.15.3
+
+### Bugfixes
+
+* Fix: Collaborator roles not appearing correctly [#1269](https://github.com/instedd/ask/issues/1269)
+
+## Oak 0.15.2
+
+### Bugfixes
+
+* Fix error during launch of mobileweb surveys [#1273](https://github.com/instedd/ask/issues/1273)
+
+## Oak 0.15.1
+
+### Features
+
+* Added "admin" role level with same permissions as "owner" [#1170](https://github.com/instedd/ask/issues/1170)
+
+### Bugfixes
+
+* Fix: invitations can be created for "owner" [#1263](https://github.com/instedd/ask/issues/1263)
+* Fix: any value could be stored for membership level [#1262](https://github.com/instedd/ask/issues/1262)
+
+## Oak 0.15
+
+This release requires Verboice 3.2
+
+### Features
+
+* Support text responses for numeric questions [#1208](https://github.com/instedd/ask/issues/1208)
+* Avoid calls out of the survey schedule [#1209](https://github.com/instedd/ask/issues/1209)
+
+## Nutmeg 0.14.2
+
+### Bugfixes
+
+* Fix error when receiving delivery confirmation of messages from Nuntium when the mode is mobile web
+
+## Nutmeg 0.14.1
+
+### Bugfixes
+
+* Fix regression of [#1156](https://github.com/instedd/ask/issues/1156)
+* Fix issues with old surveys without channel stats stored [#1207](https://github.com/instedd/ask/issues/1207)
+
+## Nutmeg 0.14
+
+### Bugfixes
+
+* Selecting "fallback mode" before "primary mode" raises an error [#1189](https://github.com/instedd/ask/issues/1189)
+* [Questionnaire] On the simulator the mouse cursor is a `pointer` but nothing is clickable [#1190](https://github.com/instedd/ask/issues/1190)
+* Changing the selected language doesn't change the loaded audio [#1194](https://github.com/instedd/ask/issues/1194)
+* [Questionnaire] The 'Thank you message' is not mandatory but it's sent all the times [#1198](https://github.com/instedd/ask/issues/1198)
+
+### Features
+
+* Export stats in respondents CSV file [#1205](https://github.com/instedd/ask/issues/1205)
+* Compute respondent stats [#1204](https://github.com/instedd/ask/issues/1204)
+* Interim Partial [#1206](https://github.com/instedd/ask/issues/1206)
+* Hide channel types when the provider is not configured [#1182](https://github.com/instedd/ask/issues/1182)
+* Channel provider should display the full provider name [#1191](https://github.com/instedd/ask/issues/1191)
+* All questions included in the quotas must be executed before rejecting the respondent. [#1156](https://github.com/instedd/ask/issues/1156)
+* Avoid unintentional capture of phone numbers [#1180](https://github.com/instedd/ask/issues/1180)
+
+## Maple 0.13.1
+
+### Bugfixes
+
+* Fix error when receiving delivery confirmation of messages from Nuntium when the mode is mobile web
+
+## Maple 0.13
+
+In this release the default batch size, applied to surveys with no cutoff rules, is raised to 10k. However this value can be customized on each deploy.
+
+This version has some performance improvements to avoid runtime and UI errors when running with surveys with millions of respondents [#1154](https://github.com/instedd/ask/issues/1154), [#1186](https://github.com/instedd/ask/issues/1186)
+
+### Features
+
+* Added "last modified" column to questionnaires and allow sorting by this value [#1177](https://github.com/instedd/ask/issues/1177)
+* Better warning message and UI before stopping a survey [#1157](https://github.com/instedd/ask/issues/1157)
+* Shortlinks to access CSV downloads without authentication [#1184](https://github.com/instedd/ask/issues/1184)
+* Block dates to skip survey scheduling [#1176](https://github.com/instedd/ask/issues/1176)
+
+### Bugfixes
+
+* Fix cases were respondents would be marked as "failed" when stopping responding after being in "completed" disposition [#1181](https://github.com/instedd/ask/issues/1181)
+* Fix UI crash while selecting quotas [#1183](https://github.com/instedd/ask/issues/1183)
+* Fix JS error in password reset form [#1124](https://github.com/instedd/ask/issues/1124)
+* Error messages were not being displayed in mobile web [#1179](https://github.com/instedd/ask/issues/1179)
+* Show time of the next execution of the survey in the timezone defined in the schedule [#1175](https://github.com/instedd/ask/issues/1175)
+* Could not download CSV results for huge surveys [#1199](https://github.com/instedd/ask/issues/1199)
+* Fix validation of refusal messages [#1120](https://github.com/instedd/ask/issues/1120)
+
+## Larch 0.12.3
+
+### Bugfixes
+
+* Fix error when receiving delivery confirmation of messages from Nuntium when the mode is mobile web
+
 ## Larch 0.12.2
 
 ### Bugfixes

@@ -1,46 +1,52 @@
 import { combineReducers } from 'redux'
 import { routerReducer as routing } from 'react-router-redux'
 import authorizations from './authorizations'
-import projects from './projects'
-import project from './project'
-import surveys from './surveys'
-import respondentsStats from './respondentsStats'
-import questionnaires from './questionnaires'
-import questionnaire from './questionnaire'
-import survey from './survey'
-import saveStatus from './saveStatus'
+import autoSaveStatus from './autoSaveStatus'
+import channel from './channel'
 import channels from './channels'
-import guisso from './guisso'
-import respondents from './respondents'
-import respondentGroups from './respondentGroups'
-import respondentsCount from './respondentsCount'
-import timezones from './timezones'
 import collaborators from './collaborators'
 import guest from './guest'
+import guisso from './guisso'
 import invite from './invite'
-import userSettings from './userSettings'
+import project from './project'
+import projects from './projects'
+import questionnaire from './questionnaire'
+import questionnaires from './questionnaires'
+import respondentGroups from './respondentGroups'
+import respondents from './respondents'
+import respondentsCount from './respondentsCount'
+import respondentsStats from './respondentsStats'
+import survey from './survey'
+import surveys from './surveys'
+import timezones from './timezones'
 import ui from './ui/index'
+import userSettings from './userSettings'
+import activities from './activities'
+import integrations from './integrations'
 
 export default combineReducers({
+  activities,
   authorizations,
-  routing,
-  project,
-  projects,
-  surveys,
-  respondentsStats,
-  questionnaire,
-  questionnaires,
-  survey,
-  saveStatus,
-  respondents,
-  respondentGroups,
-  respondentsCount,
+  autoSaveStatus,
+  channel,
   channels,
-  guisso,
-  timezones,
   collaborators,
   guest,
+  guisso,
   invite,
+  project,
+  projects,
+  questionnaire,
+  questionnaires,
+  respondentGroups,
+  respondents,
+  respondentsCount,
+  respondentsStats,
+  routing,
+  survey,
+  surveys,
+  timezones,
+  ui,
   userSettings,
-  ui
+  integrations
 })

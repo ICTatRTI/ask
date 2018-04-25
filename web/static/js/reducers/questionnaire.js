@@ -6,7 +6,7 @@ import map from 'lodash/map'
 import reject from 'lodash/reject'
 import concat from 'lodash/concat'
 import * as actions from '../actions/questionnaire'
-import uuid from 'node-uuid'
+import uuidv4 from 'uuid/v4'
 import fetchReducer from './fetch'
 import { setStepPrompt, newStepPrompt, getStepPromptSms, getStepPromptIvrText,
   getPromptSms, getPromptMobileWeb, getStepPromptMobileWeb, getPromptIvrText, getChoiceResponseSmsJoined,
@@ -14,6 +14,7 @@ import { setStepPrompt, newStepPrompt, getStepPromptSms, getStepPromptIvrText,
 import * as language from '../language'
 import { validate } from './questionnaire.validation'
 import { defaultActiveMode } from '../questionnaire.mode'
+import undoReducer from './undo'
 
 const dataReducer = (state: Questionnaire, action): Questionnaire => {
   switch (action.type) {
@@ -62,6 +63,7 @@ const dataReducer = (state: Questionnaire, action): Questionnaire => {
     case actions.CHANGE_EXPLANATION_STEP_SKIP_LOGIC: return changeExplanationStepSkipLogic(state, action)
     case actions.CHANGE_DISPOSITION: return changeDisposition(state, action)
     case actions.TOGGLE_ACCEPT_REFUSALS: return toggleAcceptsRefusals(state, action)
+    case actions.TOGGLE_ACCEPTS_ALPHABETICAL_ANSWERS: return toggleAcceptsAlphabeticalAnswers(state, action)
     case actions.CHANGE_REFUSAL: return changeRefusal(state, action)
     case actions.SET_DIRTY: return setDirty(state)
     default: return state
@@ -72,11 +74,11 @@ const validateReducer = (reducer: StoreReducer<Questionnaire>): StoreReducer<Que
   // React will call this with an undefined the first time for initialization.
   // We mimic that in the specs, so DataStore<Questionnaire> needs to become optional here.
   return (state: ?DataStore<Questionnaire>, action: any) => {
+    const oldData = state ? state.data : null
     const newState = reducer(state, action)
-    if (state !== newState) {
+
+    if ((newState.data && oldData !== newState.data) || action.type == actions.UNDO || action.type == actions.REDO) {
       validate(newState)
-    }
-    if (newState.data) {
       return {
         ...newState,
         data: {
@@ -84,9 +86,9 @@ const validateReducer = (reducer: StoreReducer<Questionnaire>): StoreReducer<Que
           valid: newState.errors.length == 0
         }
       }
-    } else {
-      return newState
     }
+
+    return newState
   }
 }
 
@@ -100,7 +102,7 @@ const dirtyPredicate = (action, oldData, newData) => {
   }
 }
 
-export default validateReducer(fetchReducer(actions, dataReducer, null, dirtyPredicate))
+export default (undoReducer(actions, dirtyPredicate, validateReducer(fetchReducer(actions, dataReducer, null, dirtyPredicate))): UndoReducer<Questionnaire>)
 
 const addChoice = (state, action) => {
   return changeStep(state, action.stepId, step => ({
@@ -486,7 +488,7 @@ const changeStepIvrAudioId = (state, action) => {
       ivr: {
         ...prompt.ivr,
         audioId: action.newId,
-        audioSource: 'upload'
+        audioSource: action.audioSource
       }
     }))
   })
@@ -564,7 +566,7 @@ const changeStepType = (state, action) => {
         return {
           id: step.id,
           type: action.stepType,
-          disposition: 'partial',
+          disposition: 'interim partial',
           title: step.title,
           skipLogic: null
         }
@@ -607,7 +609,7 @@ const addQuotaCompletedStep = (state, action) => {
 
 const newLanguageSelectionStep = (first: string, second: string): LanguageSelectionStep => {
   return {
-    id: uuid.v4(),
+    id: uuidv4(),
     type: 'language-selection',
     title: 'Language selection',
     store: 'language',
@@ -618,7 +620,7 @@ const newLanguageSelectionStep = (first: string, second: string): LanguageSelect
 
 export const newMultipleChoiceStep = () => {
   return {
-    id: uuid.v4(),
+    id: uuidv4(),
     type: 'multiple-choice',
     title: '',
     store: '',
@@ -675,7 +677,7 @@ const toggleQuotaCompletedSteps = (state, action) => {
 }
 
 export const newExplanationStep = () => ({
-  id: uuid.v4(),
+  id: uuidv4(),
   type: 'explanation',
   title: '',
   store: '',
@@ -764,47 +766,53 @@ const reorderLanguages = (state, action) => {
   }
 }
 
-const setQuestionnaireMsg = (state, action, mode) => {
-  let questionnaireMsg
-  let activeLanguageMsg
+type LocalizedSettingKey = 'errorMessage' | 'thankYouMessage';
+type MsgAction<T> = {msgKey: LocalizedSettingKey, msg: T};
 
-  questionnaireMsg = Object.assign({}, state.settings[action.msgKey])
-
-  if (state.settings[action.msgKey] && state.settings[action.msgKey][state.activeLanguage]) {
-    activeLanguageMsg = questionnaireMsg[state.activeLanguage]
-  } else {
-    activeLanguageMsg = {}
-    questionnaireMsg[state.activeLanguage] = activeLanguageMsg
-  }
-
-  let msg = action.msg
-  if (typeof (msg) == 'string') {
-    msg = msg.trim()
-  }
-  if (msg.text) {
-    msg.text = msg.text.trim()
-  }
-
-  activeLanguageMsg[mode] = msg
-
-  let newState = {
-    ...state,
-    settings: {...state.settings}
-  }
-  newState.settings[action.msgKey] = questionnaireMsg
-  return newState
+const updateLocalizedPrompt = (localizedPrompt: ?LocalizedPrompt, lang: string, update: Prompt => Prompt): LocalizedPrompt => {
+  let newLocalizedPrompt: LocalizedPrompt = {...localizedPrompt}
+  // HACK: we use this syntax because otherwise Flow would not type check this assignment
+  newLocalizedPrompt[lang] = update(newLocalizedPrompt[lang])
+  return newLocalizedPrompt
 }
 
-const setIvrQuestionnaireMsg = (state, action) => {
-  return setQuestionnaireMsg(state, action, 'ivr')
+const setQuestionnaireAudioMsg = (state: Questionnaire, key: LocalizedSettingKey, msg: AudioPrompt): Questionnaire => {
+  const audioPrompt = {
+    ...msg,
+    text: msg.text.trim()
+  }
+
+  return {...state,
+    settings: {...state.settings,
+      [key]: updateLocalizedPrompt(state.settings[key], state.activeLanguage, prompt => ({...prompt,
+        ivr: audioPrompt
+      }))
+    }
+  }
 }
 
-const setSmsQuestionnaireMsg = (state, action) => {
-  return setQuestionnaireMsg(state, action, 'sms')
+const setQuestionnaireTextMsg = (state: Questionnaire, key: LocalizedSettingKey, msg: string, mode: 'sms' | 'mobileweb'): Questionnaire => {
+  const textPrompt = msg.trim()
+
+  return {...state,
+    settings: {...state.settings,
+      [key]: updateLocalizedPrompt(state.settings[key], state.activeLanguage, prompt => ({...prompt,
+        [mode]: textPrompt
+      }))
+    }
+  }
 }
 
-const setMobileWebQuestionnaireMsg = (state, action) => {
-  return setQuestionnaireMsg(state, action, 'mobileweb')
+const setIvrQuestionnaireMsg = (state: Questionnaire, action: MsgAction<AudioPrompt>): Questionnaire => {
+  return setQuestionnaireAudioMsg(state, action.msgKey, action.msg)
+}
+
+const setSmsQuestionnaireMsg = (state: Questionnaire, action: MsgAction<string>) => {
+  return setQuestionnaireTextMsg(state, action.msgKey, action.msg, 'sms')
+}
+
+const setMobileWebQuestionnaireMsg = (state: Questionnaire, action: MsgAction<string>) => {
+  return setQuestionnaireTextMsg(state, action.msgKey, action.msg, 'mobileweb')
 }
 
 const autocompleteSmsQuestionnaireMsg = (state, action) => {
@@ -1032,20 +1040,20 @@ export const csvForTranslation = (questionnaire: Questionnaire) => {
     addMessageToCsvForTranslation(questionnaire.settings.thankYouMessage, defaultLang, context)
   }
 
-  if (questionnaire.settings.title) {
-    const defaultTitle = questionnaire.settings.title[defaultLang]
+  const title = questionnaire.settings.title
+  if (title) {
+    const defaultTitle = title[defaultLang]
     if (defaultTitle && defaultTitle.trim().length != 0) {
-      addToCsvForTranslation(defaultTitle, context, lang =>
-        questionnaire.settings.title[lang] || ''
-      )
+      addToCsvForTranslation(defaultTitle, context, lang => title[lang] || '')
     }
   }
 
-  if (questionnaire.settings.surveyAlreadyTakenMessage) {
-    const defaultMessage = questionnaire.settings.surveyAlreadyTakenMessage[defaultLang]
+  const surveyAlreadyTakenMessage = questionnaire.settings.surveyAlreadyTakenMessage
+  if (surveyAlreadyTakenMessage) {
+    const defaultMessage = surveyAlreadyTakenMessage[defaultLang]
     if (defaultMessage && defaultMessage.trim().length != 0) {
       addToCsvForTranslation(defaultMessage, context, lang =>
-        questionnaire.settings.surveyAlreadyTakenMessage[lang] || ''
+        surveyAlreadyTakenMessage[lang] || ''
       )
     }
   }
@@ -1267,6 +1275,16 @@ const toggleAcceptsRefusals = (state, action) => {
         ...refusal,
         enabled: !refusal.enabled
       }
+    }
+  })
+}
+
+const toggleAcceptsAlphabeticalAnswers = (state, action) => {
+  return changeStep(state, action.stepId, step => {
+    const alphabeticalAnswers = step.alphabeticalAnswers || false
+    return {
+      ...step,
+      alphabeticalAnswers: !alphabeticalAnswers
     }
   })
 }

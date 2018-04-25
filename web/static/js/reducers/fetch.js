@@ -20,7 +20,7 @@ const defaultFilterProvider = (action: FilteredAction) => ({
 
 const defaultDirtyPredicate = (action, oldData, newData) => true
 
-export default (actions: any, dataReducer: Reducer<any>, filterProvider: ?(action: FilteredAction) => Filter, dirtyPredicate: ?(action: Action, oldData: ?DataStore<any>, newData: ?DataStore<any>) => boolean) => (state: ?DataStore<any>, action: any): DataStore<any> => {
+export default (actions: any, dataReducer: Reducer<any>, filterProvider: ?(action: FilteredAction) => Filter, dirtyPredicate: ?DirtyPredicate<any>) => (state: ?DataStore<any>, action: any): DataStore<any> => {
   if (!filterProvider) filterProvider = defaultFilterProvider
   if (!dirtyPredicate) dirtyPredicate = defaultDirtyPredicate
 
@@ -63,6 +63,7 @@ const receive = (state, action, filterProvider) => {
     return {
       ...state,
       fetching: false,
+      dirty: false,
       data: data
     }
   }
@@ -75,7 +76,7 @@ const fetch = (state, action, filterProvider) => {
 
   let newData = null
 
-  if (isEqual(state.filter, newFilter)) {
+  if (isEqual(state.filter, newFilter) && !state.dirty) {
     newData = state.data
   }
 
@@ -88,7 +89,7 @@ const fetch = (state, action, filterProvider) => {
 }
 
 const saved = (state, action, filterProvider, dataReducer) => {
-  const newData = action.data == null ? null : dataReducer(state.data, action)
+  const newData = action.data == null ? state.data : dataReducer(state.data, action)
   return {
     ...state,
     saving: false,

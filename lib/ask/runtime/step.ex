@@ -25,7 +25,7 @@ defmodule Ask.Runtime.Step do
         end)
         if (choice), do: choice["value"], else: :invalid_answer
       "numeric" ->
-        num = is_numeric_permissive(reply)
+        num = is_numeric_permissive(reply, language, step)
         cond do
           is_refusal_option(step, reply, mode, language) ->
             {:refusal, reply}
@@ -42,8 +42,7 @@ defmodule Ask.Runtime.Step do
         else
           :invalid_answer
         end
-      "disposition" -> nil
-      "explanation" -> nil
+      _ -> nil
     end
   end
 
@@ -53,7 +52,7 @@ defmodule Ask.Runtime.Step do
         if is_refusal_option(step, reply, mode, language) do
           step["refusal"]["skip_logic"]
         else
-          value = is_numeric_permissive(reply)
+          value = is_numeric_permissive(reply, language, step)
           step["ranges"]
           |> Enum.find_value(nil, fn (range) ->
             if (range["from"] == nil || range["from"] <= value) && (range["to"]
@@ -65,12 +64,9 @@ defmodule Ask.Runtime.Step do
         |> Map.get("choices")
         |> Enum.find(fn choice -> choice["value"] == reply end)
         |> Map.get("skip_logic")
-      "explanation" ->
-        step["skip_logic"]
-      "flag" ->
-        step["skip_logic"]
-      "language-selection" ->
-        nil
+      "explanation" -> step["skip_logic"]
+      "flag" -> step["skip_logic"]
+      _ -> nil
     end
   end
 
@@ -162,10 +158,9 @@ defmodule Ask.Runtime.Step do
         |> Enum.uniq
 
         # Only send numDigits if all choices have the same length
-        if length(lengths) == 1 do
-          hd(lengths)
-        else
-          nil
+        case lengths do
+          [length] -> length
+          _ -> nil
         end
       "numeric" ->
         # Only send numDigits if the min and max values have the same string length,
@@ -234,13 +229,13 @@ defmodule Ask.Runtime.Step do
 
   defp is_numeric(str) do
     case Float.parse(str) do
-      {num, ""} -> num
+      {num, ""}  -> num
       {_num, _r} -> false               # _r : remainder_of_bianry
       :error     -> false
     end
   end
 
-  defp is_numeric_permissive(str) do
+  defp is_numeric_permissive(str, language, step) do
     case Float.parse(String.trim(str)) do
       {num, _} ->
         if round(num) == num do
@@ -248,7 +243,12 @@ defmodule Ask.Runtime.Step do
         else
           num
         end
-      :error     -> false
+      :error ->
+        if step["alphabetical_answers"] do
+          Ask.NumberTranslator.try_parse(str, language)
+        else
+          false
+        end
     end
   end
 end

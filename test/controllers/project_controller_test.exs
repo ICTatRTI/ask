@@ -3,7 +3,7 @@ defmodule Ask.ProjectControllerTest do
   use Ask.DummySteps
   use Ask.TestHelpers
 
-  alias Ask.Project
+  alias Ask.{Project, ActivityLog}
   @valid_attrs %{name: "some content"}
 
   setup %{conn: conn} do
@@ -37,19 +37,61 @@ defmodule Ask.ProjectControllerTest do
           "id"      => user_project.id,
           "name"    => user_project.name,
           "running_surveys" => 0,
-          "updated_at" => NaiveDateTime.to_iso8601(user_project.updated_at),
+          "updated_at" => DateTime.to_iso8601(user_project.updated_at),
           "read_only" => false,
           "colour_scheme" => "default",
           "owner" => true,
+          "level" => "owner"
         },
         %{
           "id"      => project2.id,
           "name"    => project2.name,
           "running_surveys" => 0,
-          "updated_at" => NaiveDateTime.to_iso8601(project2.updated_at),
+          "updated_at" => DateTime.to_iso8601(project2.updated_at),
           "read_only" => true,
           "colour_scheme" => "default",
           "owner" => false,
+          "level" => "reader"
+        }
+      ]
+    end
+
+    test "returns archived projects only", %{conn: conn, user: user} do
+      archived_project = create_project_for_user(user, archived: true)
+      create_project_for_user(user, archived: false)
+      archived_project = Project |> Repo.get(archived_project.id)
+
+      conn = get conn, project_path(conn, :index, %{"archived" => "true"})
+      assert json_response(conn, 200)["data"] == [
+        %{
+          "id"      => archived_project.id,
+          "name"    => archived_project.name,
+          "running_surveys" => 0,
+          "updated_at" => DateTime.to_iso8601(archived_project.updated_at),
+          "read_only" => true,
+          "colour_scheme" => "default",
+          "owner" => true,
+          "level" => "owner"
+        }
+      ]
+    end
+
+    test "returns active projects when no parameter is send", %{conn: conn, user: user} do
+      create_project_for_user(user, archived: true)
+      active_project = create_project_for_user(user, archived: false)
+      active_project = Project |> Repo.get(active_project.id)
+
+      conn = get conn, project_path(conn, :index)
+      assert json_response(conn, 200)["data"] == [
+        %{
+          "id"      => active_project.id,
+          "name"    => active_project.name,
+          "running_surveys" => 0,
+          "updated_at" => DateTime.to_iso8601(active_project.updated_at),
+          "read_only" => false,
+          "colour_scheme" => "default",
+          "owner" => true,
+          "level" => "owner"
         }
       ]
     end
@@ -73,24 +115,27 @@ defmodule Ask.ProjectControllerTest do
       project_map_1 = %{"id"      => project1.id,
                           "name"    => project1.name,
                           "running_surveys" => 2,
-                          "updated_at" => NaiveDateTime.to_iso8601(project1.updated_at),
+                          "updated_at" => DateTime.to_iso8601(project1.updated_at),
                           "read_only" => false,
                           "colour_scheme" => "default",
-                          "owner" => true}
+                          "owner" => true,
+                          "level" => "owner"}
       project_map_2 = %{"id"      => project2.id,
                           "name"    => project2.name,
                           "running_surveys" => 1,
-                          "updated_at" => NaiveDateTime.to_iso8601(project2.updated_at),
+                          "updated_at" => DateTime.to_iso8601(project2.updated_at),
                           "read_only" => false,
                           "colour_scheme" => "default",
-                          "owner" => true}
+                          "owner" => true,
+                          "level" => "owner"}
       project_map_3 = %{"id"      => project3.id,
                           "name"    => project3.name,
                           "running_surveys" => 0,
-                          "updated_at" => NaiveDateTime.to_iso8601(project3.updated_at),
+                          "updated_at" => DateTime.to_iso8601(project3.updated_at),
                           "read_only" => false,
                           "colour_scheme" => "default",
-                          "owner" => true}
+                          "owner" => true,
+                          "level" => "owner"}
       assert json_response(conn, 200)["data"] == [project_map_1, project_map_2, project_map_3]
     end
 
@@ -104,10 +149,11 @@ defmodule Ask.ProjectControllerTest do
       conn = get conn, project_path(conn, :show, project)
       assert json_response(conn, 200)["data"] == %{"id" => project.id,
         "name" => project.name,
-        "updated_at" => NaiveDateTime.to_iso8601(project.updated_at),
+        "updated_at" => DateTime.to_iso8601(project.updated_at),
         "read_only" => false,
         "colour_scheme" => "default",
-        "owner" => true}
+        "owner" => true,
+        "level" => "owner"}
     end
 
     test "shows chosen resource as read_only", %{conn: conn, user: user} do
@@ -116,10 +162,17 @@ defmodule Ask.ProjectControllerTest do
       conn = get conn, project_path(conn, :show, project)
       assert json_response(conn, 200)["data"] == %{"id" => project.id,
         "name" => project.name,
-        "updated_at" => NaiveDateTime.to_iso8601(project.updated_at),
+        "updated_at" => DateTime.to_iso8601(project.updated_at),
         "read_only" => true,
         "colour_scheme" => "default",
-        "owner" => false}
+        "owner" => false,
+        "level" => "reader"}
+    end
+
+    test "read_only is true when project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      conn = get conn, project_path(conn, :show, project)
+      assert json_response(conn, 200)["data"]["read_only"]
     end
 
     test "renders page not found when id is nonexistent", %{conn: conn} do
@@ -141,10 +194,11 @@ defmodule Ask.ProjectControllerTest do
       conn = get conn, project_path(conn, :show, project)
       assert json_response(conn, 200)["data"] == %{"id" => project.id,
         "name" => project.name,
-        "updated_at" => NaiveDateTime.to_iso8601(project.updated_at),
+        "updated_at" => DateTime.to_iso8601(project.updated_at),
         "read_only" => true,
         "colour_scheme" => "default",
-        "owner" => false}
+        "owner" => false,
+        "level" => "reader"}
     end
 
   end
@@ -174,6 +228,28 @@ defmodule Ask.ProjectControllerTest do
       assert Repo.get_by(Project, @valid_attrs)
     end
 
+    test "sets archived status to true", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      put conn, project_update_archived_status_path(conn, :update_archived_status, project), project: %{"archived" => "true"}
+      project = Project |> Repo.get(project.id)
+      assert project.archived
+    end
+
+    test "rejects archived parameter when it is invalid", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      conn = put conn, project_update_archived_status_path(conn, :update_archived_status, project), project: %{"archived" => "foo"}
+      assert json_response(conn, 422)["errors"]["archived"] == ["is invalid"]
+    end
+
+    test "rejects archived status update if user level is reader or editor", %{conn: conn, user: user} do
+      ["reader", "editor"] |> Enum.each(fn level ->
+        project = create_project_for_user(user, level: level)
+        assert_error_sent :forbidden, fn ->
+          put conn, project_update_archived_status_path(conn, :update_archived_status, project), project: %{"archived" => "true"}
+        end
+      end)
+    end
+
     test "updates colour_scheme when it is valid", %{conn: conn, user: user} do
       project = create_project_for_user(user)
       conn = put conn, project_path(conn, :update, project), project: %{colour_scheme: "better_data_for_health"}
@@ -197,6 +273,13 @@ defmodule Ask.ProjectControllerTest do
 
     test "rejects update if the project belong to the current user but as reader", %{conn: conn, user: user} do
       project = create_project_for_user(user, level: "reader")
+      assert_error_sent :forbidden, fn ->
+        put conn, project_path(conn, :update, project), project: @valid_attrs
+      end
+    end
+
+    test "rejects update if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
       assert_error_sent :forbidden, fn ->
         put conn, project_path(conn, :update, project), project: @valid_attrs
       end
@@ -295,6 +378,132 @@ defmodule Ask.ProjectControllerTest do
       %{"email" => user.email, "role" => "owner", "invited" => false, "code" => nil},
       %{"email" => user2.email, "role" => "editor", "invited" => true, "code" => code}
     ]
+  end
+
+  describe "activity logs" do
+    test "lists activities", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+      collaborator_email = "foo@foo.com"
+
+      %{id: create_invite_id} = insert(:activity_log, project: project, user: user, entity_type: "project", entity_id: project.id, action: "create_invite", inserted_at: Ecto.DateTime.cast!("2000-01-01 00:00:00"), metadata: %{project_name: project.name, collaborator_email: collaborator_email, role: "editor"})
+      %{id: enable_link_id} = insert(:activity_log, project: project, action: "enable_public_link", inserted_at: Ecto.DateTime.cast!("2000-01-02 00:00:00"), user: user, entity_type: "survey", entity_id: survey.id, metadata: %{survey_name: survey.name, report_type: "survey_results"})
+      create_invite_log = ActivityLog |> Repo.get!(create_invite_id)
+      enable_link_log = ActivityLog |> Repo.get!(enable_link_id)
+
+      conn = get conn, project_activities_path(conn, :activities, project.id)
+      assert json_response(conn, 200)["data"]["activities"] == [
+        %{"user_name" => user.name,
+          "action" => "create_invite",
+          "entity_type" => "project",
+          "id" => create_invite_id,
+          "inserted_at" => DateTime.to_iso8601(create_invite_log.inserted_at),
+          "remote_ip" => "192.168.0.1",
+          "metadata" => %{
+            "project_name" => project.name,
+            "collaborator_email" => collaborator_email,
+            "role" => "editor"
+          }
+        },
+        %{"user_name" => user.name,
+          "action" => "enable_public_link",
+          "entity_type" => "survey",
+          "id" => enable_link_id,
+          "remote_ip" => "192.168.0.1",
+          "inserted_at" => DateTime.to_iso8601(enable_link_log.inserted_at),
+          "metadata" => %{
+            "survey_name" => survey.name,
+            "report_type" => "survey_results"
+          }
+        }
+      ]
+      assert json_response(conn, 200)["meta"]["count"] == 2
+    end
+
+    test "paginates activities", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+
+      insert(:activity_log, project: project, action: "create_invite", inserted_at: Ecto.DateTime.cast!("2000-01-01 00:00:00"))
+      insert(:activity_log, project: project, action: "edit_collaborator", inserted_at: Ecto.DateTime.cast!("2000-01-02 00:00:00"))
+      insert(:activity_log, project: project, action: "enable_public_link", inserted_at: Ecto.DateTime.cast!("2000-01-03 00:00:00"))
+      insert(:activity_log, project: project, action: "start", inserted_at: Ecto.DateTime.cast!("2000-01-04 00:00:00"))
+
+      first_page = get conn, project_activities_path(conn, :activities, project.id, page: 1, limit: 2)
+      second_page = get conn, project_activities_path(conn, :activities, project.id, page: 2, limit: 2)
+
+      assert (json_response(first_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["create_invite", "edit_collaborator"]
+      assert (json_response(first_page, 200)["meta"]["count"] == 4)
+      assert (json_response(second_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["enable_public_link", "start"]
+      assert (json_response(second_page, 200)["meta"]["count"] == 4)
+    end
+
+    test "sort activities by insertedAt in ascendent order", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+
+      insert(:activity_log, project: project, action: "create_invite", inserted_at: Ecto.DateTime.cast!("2000-01-01 00:00:00"))
+      insert(:activity_log, project: project, action: "edit_collaborator", inserted_at: Ecto.DateTime.cast!("2000-01-02 00:00:00"))
+      insert(:activity_log, project: project, action: "enable_public_link", inserted_at: Ecto.DateTime.cast!("2000-01-03 00:00:00"))
+      insert(:activity_log, project: project, action: "start", inserted_at: Ecto.DateTime.cast!("2000-01-04 00:00:00"))
+
+      first_page = get conn, project_activities_path(conn, :activities, project.id, page: 1, limit: 2, sort_by: "insertedAt", sort_asc: true)
+      second_page = get conn, project_activities_path(conn, :activities, project.id, page: 2, limit: 2, sort: "insertedAt", sort_asc: true)
+
+      assert (json_response(first_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["create_invite", "edit_collaborator"]
+      assert (json_response(first_page, 200)["meta"]["count"] == 4)
+      assert (json_response(second_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["enable_public_link", "start"]
+      assert (json_response(second_page, 200)["meta"]["count"] == 4)
+    end
+
+    test "sort activities by insertedAt in descendent order", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+
+      insert(:activity_log, project: project, action: "create_invite", inserted_at: Ecto.DateTime.cast!("2000-01-01 00:00:00"))
+      insert(:activity_log, project: project, action: "edit_collaborator", inserted_at: Ecto.DateTime.cast!("2000-01-02 00:00:00"))
+      insert(:activity_log, project: project, action: "enable_public_link", inserted_at: Ecto.DateTime.cast!("2000-01-03 00:00:00"))
+      insert(:activity_log, project: project, action: "start", inserted_at: Ecto.DateTime.cast!("2000-01-04 00:00:00"))
+
+      first_page = get conn, project_activities_path(conn, :activities, project.id, page: 1, limit: 2, sort_by: "insertedAt", sort_asc: false)
+      second_page = get conn, project_activities_path(conn, :activities, project.id, page: 2, limit: 2, sort_by: "insertedAt", sort_asc: false)
+
+      assert (json_response(first_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["start", "enable_public_link"]
+      assert (json_response(first_page, 200)["meta"]["count"] == 4)
+      assert (json_response(second_page, 200)["data"]["activities"] |> Enum.map(&(&1["action"]))) == ["edit_collaborator", "create_invite"]
+      assert (json_response(second_page, 200)["meta"]["count"] == 4)
+    end
+
+    test "doesn't list activities of other project", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      project2 = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+      collaborator_email = "foo@foo.com"
+
+      %{id: create_invite_id} = insert(:activity_log, project: project, user: user, entity_type: "project", entity_id: project.id, action: "create_invite", inserted_at: Ecto.DateTime.cast!("2000-01-01 00:00:00"), metadata: %{project_name: project.name, collaborator_email: collaborator_email, role: "editor"})
+      insert(:activity_log, project: project2, action: "enable_public_link", inserted_at: Ecto.DateTime.cast!("2000-01-02 00:00:00"), user: user, entity_type: "survey", entity_id: survey.id, metadata: %{survey_name: survey.name, report_type: "survey_results"})
+      create_invite_log = ActivityLog |> Repo.get!(create_invite_id)
+
+      conn = get conn, project_activities_path(conn, :activities, project.id)
+      assert json_response(conn, 200)["data"]["activities"] == [
+        %{"user_name" => user.name,
+          "action" => "create_invite",
+          "entity_type" => "project",
+          "id" => create_invite_log.id,
+          "remote_ip" => "192.168.0.1",
+          "inserted_at" => DateTime.to_iso8601(create_invite_log.inserted_at),
+          "metadata" => %{
+            "project_name" => project.name,
+            "collaborator_email" => collaborator_email,
+            "role" => "editor"
+          }
+        }
+      ]
+    end
+
+    test "forbid access if user is not member of the project", %{conn: conn} do
+      project = insert(:project)
+      assert_error_sent :forbidden, fn ->
+        get conn, project_activities_path(conn, :activities, project)
+      end
+    end
   end
 
 end

@@ -24,9 +24,15 @@ export type Survey = {
     vars: string[],
     buckets: Bucket[]
   },
+  links: Link[],
   comparisons: Comparison[],
   nextScheduleTime: ?string
 };
+
+export type Link = {
+  name: string,
+  url: string
+}
 
 export type Schedule = {
   dayOfWeek: DayOfWeek,
@@ -82,9 +88,17 @@ export type Respondent = {
   questionnaireId: number
 };
 
+export type Integration = {
+  id: number,
+  name: string,
+  uri: string,
+  authToken: string,
+  state: "enabled" | "terminated" | "disabled"
+};
+
 export type Response = {
   name: string,
   value: ?string
-}
+};
 
 export type Disposition = null | "completed" | "partial" | "ineligible";

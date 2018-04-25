@@ -53,7 +53,10 @@ export const SET_SECONDARY_COLOR = 'QUESTIONNAIRE_SET_SECONDARY_COLOR'
 export const SET_DISPLAYED_TITLE = 'QUESTIONNAIRE_SET_DISPLAYED_TITLE'
 export const SET_SURVEY_ALREADY_TAKEN_MESSAGE = 'QUESTIONNAIRE_SET_SURVEY_ALREADY_TAKEN_MESSAGE'
 export const TOGGLE_QUOTA_COMPLETED_STEPS = 'QUESTIONNAIRE_TOGGLE_QUOTA_COMPLETED_STEPS'
+export const TOGGLE_ACCEPTS_ALPHABETICAL_ANSWERS = 'QUESTIONNAIRE_TOGGLE_ACCEPTS_ALPHABETICAL_ANSWERS'
 export const SET_DIRTY = 'QUESTIONNAIRE_SET_DIRTY'
+export const UNDO = 'QUESTIONNAIRE_UNDO'
+export const REDO = 'QUESTIONNAIRE_REDO'
 
 export const fetchQuestionnaire = (projectId, id) => (dispatch, getState) => {
   dispatch(fetch(projectId, id))
@@ -104,6 +107,14 @@ export const shouldFetch = (state, projectId, id) => {
 
 export const setDirty = () => ({
   type: SET_DIRTY
+})
+
+export const undo = () => ({
+  type: UNDO
+})
+
+export const redo = () => ({
+  type: REDO
 })
 
 export const addChoice = (stepId) => ({
@@ -171,10 +182,11 @@ export const changeStepPromptMobileWeb = (stepId, newPrompt) => ({
   newPrompt
 })
 
-export const changeStepAudioIdIvr = (stepId, newId) => ({
+export const changeStepAudioIdIvr = (stepId, newId, audioSource) => ({
   type: CHANGE_STEP_AUDIO_ID_IVR,
   stepId,
-  newId
+  newId,
+  audioSource
 })
 
 export const changeStepTitle = (stepId, newTitle) => ({
@@ -320,7 +332,10 @@ export const autocompleteIvrQuestionnaireMsg = (msgKey, item) => ({
 export const save = () => (dispatch, getState) => {
   const questionnaire = getState().questionnaire.data
   dispatch(saving())
-  api.updateQuestionnaire(questionnaire.projectId, questionnaire).then((response) => dispatch(saved(response.entities.questionnaires[response.result])))
+  return api.updateQuestionnaire(questionnaire.projectId, questionnaire)
+    .then(response =>
+      dispatch(saved(response.entities.questionnaires[response.result]))
+    )
 }
 
 export const createQuestionnaire = (projectId) => (dispatch) =>
@@ -383,6 +398,11 @@ export const changeDisposition = (stepId, disposition) => ({
 
 export const toggleAcceptsRefusals = (stepId) => ({
   type: TOGGLE_ACCEPT_REFUSALS,
+  stepId
+})
+
+export const toggleAcceptsAlphabeticalAnswers = (stepId) => ({
+  type: TOGGLE_ACCEPTS_ALPHABETICAL_ANSWERS,
   stepId
 })
 

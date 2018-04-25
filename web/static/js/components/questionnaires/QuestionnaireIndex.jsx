@@ -10,10 +10,10 @@ import * as actions from '../../actions/questionnaires'
 import * as questionnaireActions from '../../actions/questionnaire'
 import * as userSettingsActions from '../../actions/userSettings'
 import * as projectActions from '../../actions/project'
-import { AddButton, EmptyPage, SortableHeader, CardTable, UntitledIfEmpty, Tooltip } from '../ui'
+import { AddButton, EmptyPage, SortableHeader, CardTable, UntitledIfEmpty, Tooltip, ConfirmationModal, PagingFooter } from '../ui'
 import * as routes from '../../routes'
-import { ConfirmationModal } from '../ui/ConfirmationModal'
 import { modeLabel, modeOrder } from '../../questionnaire.mode'
+import { translate, Trans } from 'react-i18next'
 
 class QuestionnaireIndex extends Component {
   creatingQuestionnaire: boolean
@@ -30,13 +30,11 @@ class QuestionnaireIndex extends Component {
     this.props.userSettingsActions.fetchSettings()
   }
 
-  nextPage(e) {
-    e.preventDefault()
+  nextPage() {
     this.props.actions.nextQuestionnairesPage()
   }
 
-  previousPage(e) {
-    e.preventDefault()
+  previousPage() {
     this.props.actions.previousQuestionnairesPage()
   }
 
@@ -82,13 +80,13 @@ class QuestionnaireIndex extends Component {
   }
 
   delete(questionnaire: Questionnaire) {
-    const { projectId, actions } = this.props
+    const { projectId, actions, t } = this.props
 
     const deleteConfirmationModal: ConfirmationModal = this.refs.deleteConfirmationModal
     deleteConfirmationModal.open({
-      modalText: <span>
-        <p>Are you sure you want to delete the questionnaire <b><UntitledIfEmpty text={questionnaire.name} entityName='questionnaire' /></b>?</p>
-      </span>,
+      modalText: <Trans>
+        <p>Are you sure you want to delete the questionnaire <b><UntitledIfEmpty text={questionnaire.name} emptyText={t('Untitled questionnaire')} /></b>?</p>
+      </Trans>,
       onConfirm: () => {
         actions.deleteQuestionnaire(projectId, questionnaire)
       }
@@ -96,40 +94,28 @@ class QuestionnaireIndex extends Component {
   }
 
   render() {
-    const { questionnaires, project, sortBy, sortAsc, pageSize, startIndex, endIndex,
-      totalCount, hasPreviousPage, hasNextPage, userSettings } = this.props
+    const { questionnaires, project, sortBy, sortAsc, pageSize, startIndex, endIndex, totalCount, userSettings, t } = this.props
 
     if (!questionnaires || !userSettings.settings) {
       return (
         <div>
-          <CardTable title='Loading questionnaires...' highlight />
+          <CardTable title={t('Loading questionnaires...')} highlight />
         </div>
       )
     }
 
     const title = `${totalCount} ${(totalCount == 1) ? ' questionnaire' : ' questionnaires'}`
-    const footer = (
-      <div className='card-action right-align'>
-        <ul className='pagination'>
-          <li><span className='grey-text'>{startIndex}-{endIndex} of {totalCount}</span></li>
-          { hasPreviousPage
-            ? <li><a href='#!' onClick={e => this.previousPage(e)}><i className='material-icons'>chevron_left</i></a></li>
-            : <li className='disabled'><i className='material-icons'>chevron_left</i></li>
-          }
-          { hasNextPage
-            ? <li><a href='#!' onClick={e => this.nextPage(e)}><i className='material-icons'>chevron_right</i></a></li>
-            : <li className='disabled'><i className='material-icons'>chevron_right</i></li>
-          }
-        </ul>
-      </div>
-    )
+    const footer = <PagingFooter
+      {...{startIndex, endIndex, totalCount}}
+      onPreviousPage={() => this.previousPage()}
+      onNextPage={() => this.nextPage()} />
 
     const readOnly = !project || project.readOnly
 
     let addButton = null
     if (!readOnly) {
       addButton = (
-        <AddButton text='Add questionnaire' onClick={e => this.newQuestionnaire(e)} />
+        <AddButton text={t('Add questionnaire')} onClick={e => this.newQuestionnaire(e)} />
       )
     }
 
@@ -137,13 +123,13 @@ class QuestionnaireIndex extends Component {
       <div>
         {addButton}
         { (questionnaires.length == 0)
-          ? <EmptyPage icon='assignment' title='You have no questionnaires on this project' onClick={e => this.newQuestionnaire(e)} />
+          ? <EmptyPage icon='assignment' title={t('You have no questionnaires on this project')} onClick={e => this.newQuestionnaire(e)} readOnly={readOnly} createText={t('Create one', {context: 'questionnaire'})} />
         : <CardTable title={title} footer={footer} highlight style={{tableLayout: 'fixed'}}>
           <thead>
             <tr>
               <SortableHeader text='Name' property='name' sortBy={sortBy} sortAsc={sortAsc} onClick={(name) => this.sortBy(name)} />
               <SortableHeader text='Last Modified' property='updatedAt' sortBy={sortBy} sortAsc={sortAsc} onClick={(propertyName) => this.sortBy(propertyName)} />
-              <th>Modes</th>
+              <th>{t('Modes')}</th>
               {readOnly ? null : <th className='action' />}
               {readOnly ? null : <th className='action' />}
               <th style={{width: '20px'}} />
@@ -157,7 +143,7 @@ class QuestionnaireIndex extends Component {
               return (
                 <tr key={questionnaire.id}>
                   <td onClick={() => this.goTo(questionnaire.id)}>
-                    <UntitledIfEmpty text={questionnaire.name} entityName='questionnaire' />
+                    <UntitledIfEmpty text={questionnaire.name} emptyText={t('Untitled questionnaire')} />
                   </td>
                   <td onClick={() => this.goTo(questionnaire.id)}>
                     {questionnaire.updatedAt ? dateformat(new Date(questionnaire.updatedAt), 'mmm d, yyyy HH:MM') : '-'}
@@ -167,7 +153,7 @@ class QuestionnaireIndex extends Component {
                   </td>
                   {readOnly ? null
                     : <td className='action'>
-                      <Tooltip text='Duplicate questionnaire'>
+                      <Tooltip text={t('Duplicate questionnaire')}>
                         <a onClick={() => this.duplicate(questionnaire)}>
                           <i className='material-icons'>content_copy</i>
                         </a>
@@ -175,7 +161,7 @@ class QuestionnaireIndex extends Component {
                     </td>}
                   {readOnly ? null
                     : <td className='action'>
-                      <Tooltip text='Delete questionnaire'>
+                      <Tooltip text={t('Delete questionnaire')}>
                         <a onClick={() => this.delete(questionnaire)}>
                           <i className='material-icons'>delete</i>
                         </a>
@@ -193,13 +179,14 @@ class QuestionnaireIndex extends Component {
           </tbody>
         </CardTable>
         }
-        <ConfirmationModal modalId='questionnaire_index_delete' ref='deleteConfirmationModal' confirmationText='DELETE' header='Delete questionnaire' showCancel />
+        <ConfirmationModal modalId='questionnaire_index_delete' ref='deleteConfirmationModal' confirmationText={t('DELETE')} header={t('Delete questionnaire')} showCancel />
       </div>
     )
   }
 }
 
 QuestionnaireIndex.propTypes = {
+  t: PropTypes.func,
   actions: PropTypes.object.isRequired,
   projectActions: PropTypes.object.isRequired,
   questionnaireActions: PropTypes.object.isRequired,
@@ -213,8 +200,6 @@ QuestionnaireIndex.propTypes = {
   pageSize: PropTypes.number.isRequired,
   startIndex: PropTypes.number.isRequired,
   endIndex: PropTypes.number.isRequired,
-  hasPreviousPage: PropTypes.bool.isRequired,
-  hasNextPage: PropTypes.bool.isRequired,
   totalCount: PropTypes.number.isRequired,
   router: PropTypes.object
 }
@@ -232,8 +217,6 @@ const mapStateToProps = (state, ownProps) => {
   }
   const startIndex = Math.min(totalCount, pageIndex + 1)
   const endIndex = Math.min(pageIndex + pageSize, totalCount)
-  const hasPreviousPage = startIndex > 1
-  const hasNextPage = endIndex < totalCount
   return {
     projectId: ownProps.params.projectId,
     project: state.project.data,
@@ -244,8 +227,6 @@ const mapStateToProps = (state, ownProps) => {
     pageSize,
     startIndex,
     endIndex,
-    hasPreviousPage,
-    hasNextPage,
     totalCount
   }
 }
@@ -257,4 +238,4 @@ const mapDispatchToProps = (dispatch) => ({
   userSettingsActions: bindActionCreators(userSettingsActions, dispatch)
 })
 
-export default withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireIndex))
+export default translate()(withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireIndex)))

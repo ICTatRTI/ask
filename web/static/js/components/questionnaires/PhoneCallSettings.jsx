@@ -9,6 +9,7 @@ import { getPromptIvr, getPromptIvrText } from '../../step'
 import * as actions from '../../actions/questionnaire'
 import * as api from '../../api'
 import withQuestionnaire from './withQuestionnaire'
+import { translate } from 'react-i18next'
 
 class PhoneCallSettings extends Component {
   constructor(props) {
@@ -56,7 +57,7 @@ class PhoneCallSettings extends Component {
     }))
   }
 
-  handleFileUpload = (files, key) => {
+  handleFileUploadOrRecord = (files, key, load = true) => {
     createAudio(files)
       .then(response => {
         const { dispatch } = this.props
@@ -65,7 +66,9 @@ class PhoneCallSettings extends Component {
           ...ivr,
           audioId: response.result
         }))
-        $(`.${key}Audio audio`)[0].load()
+        if (load) {
+          $(`.${key}Audio audio`)[0].load()
+        }
       })
       .catch((e) => {
         e.json()
@@ -91,7 +94,7 @@ class PhoneCallSettings extends Component {
               <div className='card-content closed-step'>
                 <a className='truncate' href='#!' onClick={(e) => this.handleClick(e)}>
                   <i className={iconClass}>build</i>
-                  <span className={classNames({'text-error': hasErrors})}>Phone call settings</span>
+                  <span className={classNames({'text-error': hasErrors})}>{this.props.t('Phone call settings')}</span>
                   <i className={classNames({'material-icons right grey-text': true, 'text-error': hasErrors})}>expand_more</i>
                 </a>
               </div>
@@ -112,7 +115,7 @@ class PhoneCallSettings extends Component {
                 <div className='col s12'>
                   <i className='material-icons left'>build</i>
                   <a className='page-title truncate'>
-                    <span>Phone call settings</span>
+                    <span>{this.props.t('Phone call settings')}</span>
                   </a>
                   <a className='collapse right' href='#!' onClick={(e) => this.handleClick(e)}>
                     <i className='material-icons'>expand_less</i>
@@ -136,7 +139,7 @@ class PhoneCallSettings extends Component {
     let ivrInputErrors = this.textErrors('errorMessage')
     let ivrAudioIdErrors = this.audioErrors('errorMessage')
     return <IvrPrompt
-      label='Error message'
+      label={this.props.t('Error message')}
       inputErrors={ivrInputErrors}
       audioIdErrors={ivrAudioIdErrors}
       value={this.state.errorMessage.text}
@@ -145,7 +148,8 @@ class PhoneCallSettings extends Component {
       onBlur={e => this.messageBlur(e, 'errorMessage')}
       changeIvrMode={(e, mode) => this.modeChange(e, mode, 'errorMessage')}
       ivrPrompt={this.state.errorMessage}
-      customHandlerFileUpload={files => this.handleFileUpload(files, 'errorMessage')}
+      customHandlerFileUpload={files => this.handleFileUploadOrRecord(files, 'errorMessage')}
+      customHandlerRecord={files => this.handleFileUploadOrRecord(files, 'errorMessage', false)}
       autocomplete
       autocompleteGetData={(value, callback) => this.autocompleteGetData(value, callback, 'errorMessage')}
       autocompleteOnSelect={(item) => this.autocompleteOnSelect(item, 'errorMessage')}
@@ -156,7 +160,7 @@ class PhoneCallSettings extends Component {
     let ivrInputErrors = this.textErrors('thankYouMessage')
     let ivrAudioIdErrors = this.audioErrors('thankYouMessage')
     return <IvrPrompt
-      label='Thank you message'
+      label={this.props.t('Thank you message')}
       inputErrors={ivrInputErrors}
       audioIdErrors={ivrAudioIdErrors}
       value={this.state.thankYouMessage.text}
@@ -165,7 +169,8 @@ class PhoneCallSettings extends Component {
       onBlur={e => this.messageBlur(e, 'thankYouMessage')}
       changeIvrMode={(e, mode) => this.modeChange(e, mode, 'thankYouMessage')}
       ivrPrompt={this.state.thankYouMessage}
-      customHandlerFileUpload={files => this.handleFileUpload(files, 'thankYouMessage')}
+      customHandlerFileUpload={files => this.handleFileUploadOrRecord(files, 'thankYouMessage')}
+      customHandlerRecord={files => this.handleFileUploadOrRecord(files, 'thankYouMessage', false)}
       autocomplete
       autocompleteGetData={(value, callback) => this.autocompleteGetData(value, callback, 'thankYouMessage')}
       autocompleteOnSelect={(item) => this.autocompleteOnSelect(item, 'thankYouMessage')}
@@ -247,6 +252,7 @@ class PhoneCallSettings extends Component {
 
 PhoneCallSettings.propTypes = {
   dispatch: PropTypes.any,
+  t: PropTypes.func,
   questionnaire: PropTypes.object,
   errorsByPath: PropTypes.object,
   errorMessage: PropTypes.object,
@@ -260,4 +266,4 @@ const mapStateToProps = (state, ownProps) => ({
   thankYouMessage: getPromptIvr(ownProps.questionnaire.settings.thankYouMessage, ownProps.questionnaire.activeLanguage)
 })
 
-export default withQuestionnaire(connect(mapStateToProps)(PhoneCallSettings))
+export default translate()(withQuestionnaire(connect(mapStateToProps)(PhoneCallSettings)))

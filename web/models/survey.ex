@@ -2,35 +2,41 @@ defmodule Ask.Survey do
   use Ask.Web, :model
 
   alias __MODULE__
-  alias Ask.Schedule
+  alias Ask.{Schedule, ShortLink, Repo, Respondent, RespondentGroup, QuotaBucket, Questionnaire, SurveyQuestionnaire, Project, FloipEndpoint}
+  alias Ask.Runtime.Broker
+  alias Ask.Ecto.Type.JSON
 
   @max_int 2147483647
 
   schema "surveys" do
     field :name, :string
-    field :mode, Ask.Ecto.Type.JSON
+    field :mode, JSON
     field :state, :string, default: "not_ready" # not_ready, ready, pending, running, terminated
     field :exit_code, :integer
     field :exit_message, :string
     field :cutoff, :integer
     field :count_partial_results, :boolean, default: false
-    field :schedule, Schedule, default: Ask.Schedule.default()
+    field :schedule, Schedule, default: Schedule.default()
     field :started_at, Timex.Ecto.DateTime
     field :sms_retry_configuration, :string
     field :ivr_retry_configuration, :string
     field :mobileweb_retry_configuration, :string
     field :fallback_delay, :string
-    field :quota_vars, Ask.Ecto.Type.JSON, default: []
-    field :quotas, Ask.Ecto.Type.JSON, virtual: true
-    field :comparisons, Ask.Ecto.Type.JSON, default: []
+    field :quota_vars, JSON, default: []
+    field :quotas, JSON, virtual: true
+    field :comparisons, JSON, default: []
     field :simulation, :boolean, default: false
+    field :links, :any, virtual: true
+    field :floip_package_id, :string
 
-    has_many :respondent_groups, Ask.RespondentGroup
-    has_many :respondents, Ask.Respondent
-    has_many :quota_buckets, Ask.QuotaBucket, on_replace: :delete
-    many_to_many :questionnaires, Ask.Questionnaire, join_through: Ask.SurveyQuestionnaire, on_replace: :delete
+    has_many :respondent_groups, RespondentGroup
+    has_many :respondents, Respondent
+    has_many :quota_buckets, QuotaBucket, on_replace: :delete
+    many_to_many :questionnaires, Questionnaire, join_through: SurveyQuestionnaire, on_replace: :delete
 
-    belongs_to :project, Ask.Project
+    has_many :floip_endpoints, FloipEndpoint
+
+    belongs_to :project, Project
 
     timestamps()
   end
@@ -41,6 +47,7 @@ defmodule Ask.Survey do
   def changeset(struct, params \\ %{}) do
     struct
     |> cast(params, [:name, :project_id, :mode, :state, :exit_code, :exit_message, :cutoff, :schedule, :sms_retry_configuration, :ivr_retry_configuration, :mobileweb_retry_configuration, :fallback_delay, :started_at, :quotas, :quota_vars, :comparisons, :count_partial_results, :simulation])
+    |> set_floip_package_id
     |> validate_required([:project_id, :state, :schedule])
     |> foreign_key_constraint(:project_id)
     |> validate_from_less_than_to
@@ -52,8 +59,16 @@ defmodule Ask.Survey do
     if quotas = get_field(changeset, :quotas) do
       delete_change(changeset, :quotas)
       |> change(quota_vars: quotas["vars"])
-      |> put_assoc(:quota_buckets, Ask.QuotaBucket.build_changeset(changeset.data, quotas["buckets"]))
+      |> put_assoc(:quota_buckets, QuotaBucket.build_changeset(changeset.data, quotas["buckets"]))
       |> cast_assoc(:quota_buckets)
+    else
+      changeset
+    end
+  end
+
+  defp set_floip_package_id(changeset) do
+    unless get_field(changeset, :floip_package_id) do
+      change(changeset, floip_package_id: Ecto.UUID.generate)
     else
       changeset
     end
@@ -82,12 +97,24 @@ defmodule Ask.Survey do
     end
   end
 
+  def editable?(%{state: "running"}), do: false
+  def editable?(%{state: "terminated"}), do: false
+  def editable?(_), do: true
+
   def validate_from_less_than_to(changeset) do
     case Schedule.validate(get_field(changeset, :schedule)) do
       :error ->
         add_error(changeset, :from, "has to be less than the To")
       :ok ->
         changeset
+    end
+  end
+
+  def packages(survey) do
+    if Survey.has_floip_package?(survey) do
+      [survey.floip_package_id]
+    else
+      []
     end
   end
 
@@ -221,7 +248,7 @@ defmodule Ask.Survey do
   end
 
   def environment_variable_named(name) do
-    case Application.get_env(:ask, Ask.Runtime.Broker)[name] do
+    case Application.get_env(:ask, Broker)[name] do
       {:system, env_var} ->
         String.to_integer(System.get_env(env_var))
       {:system, env_var, default} ->
@@ -255,8 +282,41 @@ defmodule Ask.Survey do
     survey.state == "terminated" && survey.exit_code == 1
   end
 
-  def cancel_respondents(survey) do
-    from(r in Ask.Respondent, where: (((r.state == "active") or (r.state == "stalled")) and (r.survey_id == ^survey.id)))
-    |> Ask.Repo.update_all(set: [state: "cancelled", session: nil, timeout_at: nil])
+  def has_floip_package?(survey) do
+    survey.state == "running" || survey.state == "terminated"
   end
+
+  def cancel_respondents(survey) do
+    from(r in Respondent, where: (((r.state == "active") or (r.state == "stalled")) and (r.survey_id == ^survey.id)))
+    |> Repo.update_all(set: [state: "cancelled", session: nil, timeout_at: nil])
+  end
+
+  def with_links(%Survey{} = survey, level \\ "owner") do
+    %{survey | links: links(survey, level)}
+  end
+
+  def links(%Survey{} = survey, "owner") do
+    links([
+      link_name(survey, :results),
+      link_name(survey, :incentives),
+      link_name(survey, :disposition_history),
+      link_name(survey, :interactions)
+    ])
+  end
+
+  def links(%Survey{} = survey, _) do
+    links([
+      link_name(survey, :results),
+      link_name(survey, :disposition_history)
+    ])
+  end
+
+  def links(names) do
+    ShortLink |> where([l], l.name in ^names) |> Repo.all
+  end
+
+  def link_name(%{id: id}, :results), do: "survey/#{id}/results"
+  def link_name(%{id: id}, :incentives), do: "survey/#{id}/incentives"
+  def link_name(%{id: id}, :disposition_history), do: "survey/#{id}/disposition_history"
+  def link_name(%{id: id}, :interactions), do: "survey/#{id}/interactions"
 end

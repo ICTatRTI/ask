@@ -2,7 +2,7 @@ defmodule Ask.RespondentGroupControllerTest do
   use Ask.ConnCase
   use Ask.TestHelpers
 
-  alias Ask.{Project, RespondentGroup, Respondent, Channel, RespondentGroupChannel}
+  alias Ask.{Project, RespondentGroup, Respondent, Channel, RespondentGroupChannel, Stats}
 
   setup %{conn: conn} do
     user = insert(:user)
@@ -77,6 +77,20 @@ defmodule Ask.RespondentGroupControllerTest do
       assert Enum.at(respondents, 0).phone_number == "(549) 11 4234 2343"
       assert Enum.at(respondents, 0).sanitized_phone_number == "5491142342343"
       assert Enum.at(respondents, 0).respondent_group_id == group.id
+      assert Enum.at(respondents, 0).stats == %Stats{}
+    end
+
+    test "does not upload a CSV file for a new group when the survey is running", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project, state: "running")
+
+      file = %Plug.Upload{path: "test/fixtures/respondent_phone_numbers.csv", filename: "phone_numbers.csv"}
+
+      conn = post conn, project_survey_respondent_group_path(conn, :create, project.id, survey.id), file: file
+      assert json_response(conn, 422)
+
+      all = Repo.all(from r in Respondent, where: r.survey_id == ^survey.id)
+      assert length(all) == 0
     end
 
     test "uploads CSV file with phone numbers ignoring additional columns", %{conn: conn, user: user} do
@@ -222,22 +236,32 @@ defmodule Ask.RespondentGroupControllerTest do
     end
 
     test "updates project updated_at when uploading CSV", %{conn: conn, user: user}  do
-      datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-      project = insert(:project, updated_at: datetime)
-      insert(:project_membership, user: user, project: project, level: "owner")
+      {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+      project = create_project_for_user(user, updated_at: datetime)
       survey = insert(:survey, project: project)
 
       file = %Plug.Upload{path: "test/fixtures/respondent_phone_numbers.csv", filename: "phone_numbers.csv"}
       post conn, project_survey_respondent_group_path(conn, :create, project.id, survey.id), file: file
 
       project = Project |> Repo.get(project.id)
-      assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+      assert DateTime.compare(project.updated_at, datetime) == :gt
     end
 
     test "forbids upload for project reader", %{conn: conn, user: user}  do
       datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
       project = insert(:project, updated_at: datetime)
       insert(:project_membership, user: user, project: project, level: "reader")
+      survey = insert(:survey, project: project)
+
+      file = %Plug.Upload{path: "test/fixtures/respondent_phone_numbers.csv", filename: "phone_numbers.csv"}
+      assert_error_sent :forbidden, fn ->
+        post conn, project_survey_respondent_group_path(conn, :create, project.id, survey.id), file: file
+      end
+    end
+
+    test "forbids upload if project is archived", %{conn: conn, user: user}  do
+      project = insert(:project, archived: true)
+      insert(:project_membership, user: user, project: project, level: "owner")
       survey = insert(:survey, project: project)
 
       file = %Plug.Upload{path: "test/fixtures/respondent_phone_numbers.csv", filename: "phone_numbers.csv"}
@@ -274,6 +298,41 @@ defmodule Ask.RespondentGroupControllerTest do
 
       assert channel_ids == [channel.id]
     end
+
+    test "it doesn't updates the group channels when the survey is running", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      questionnaire = insert(:questionnaire, name: "test", project: project)
+      survey = insert(:survey, project: project, cutoff: 4, questionnaires: [questionnaire], state: "running", schedule: completed_schedule())
+      group = insert(:respondent_group, survey: survey, respondents_count: 1)
+      channel = insert(:channel, name: "test")
+
+      attrs = %{channels: [%{id: channel.id, mode: channel.type}]}
+      conn = put conn, project_survey_respondent_group_path(conn, :update, project.id, survey.id, group.id), respondent_group: attrs
+      assert response(conn, 422)
+
+      group = RespondentGroup
+      |> Repo.get!(group.id)
+      |> Repo.preload(:channels)
+
+      channel_ids = group.channels
+      |> Enum.map(&(&1.id))
+
+      assert channel_ids == []
+    end
+
+    test "forbids to update group channels if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      questionnaire = insert(:questionnaire, name: "test", project: project)
+      survey = insert(:survey, project: project, cutoff: 4, questionnaires: [questionnaire], state: "ready", schedule: completed_schedule())
+      group = insert(:respondent_group, survey: survey, respondents_count: 1)
+      channel = insert(:channel, name: "test")
+
+      attrs = %{channels: [%{id: channel.id, mode: channel.type}]}
+
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_respondent_group_path(conn, :update, project.id, survey.id, group.id), respondent_group: attrs
+      end
+    end
   end
 
   describe "delete" do
@@ -286,7 +345,7 @@ defmodule Ask.RespondentGroupControllerTest do
       entries = File.stream!("test/fixtures/respondent_phone_numbers.csv") |>
       CSV.decode(separator: ?\t) |>
       Enum.map(fn row ->
-        %{phone_number: Enum.at(row, 0), survey_id: survey.id, respondent_group_id: group.id, inserted_at: local_time, updated_at: local_time}
+        %{phone_number: Enum.at(row, 0), survey_id: survey.id, respondent_group_id: group.id, inserted_at: local_time, updated_at: local_time, disposition: "registered", stats: %Stats{}}
       end)
 
       {respondents_count, _ } = Repo.insert_all(Respondent, entries)
@@ -304,20 +363,46 @@ defmodule Ask.RespondentGroupControllerTest do
       assert length(all) == 0
     end
 
+    test "it doesn't deletes a group when the survey is running", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project, state: "running")
+      {:ok, local_time } = Ecto.DateTime.cast :calendar.local_time()
+      group = insert(:respondent_group, survey: survey)
+
+      entries = File.stream!("test/fixtures/respondent_phone_numbers.csv") |>
+      CSV.decode(separator: ?\t) |>
+      Enum.map(fn row ->
+        %{phone_number: Enum.at(row, 0), survey_id: survey.id, respondent_group_id: group.id, inserted_at: local_time, updated_at: local_time, disposition: "registered", stats: %Stats{}}
+      end)
+
+      {respondents_count, _ } = Repo.insert_all(Respondent, entries)
+
+      all = Repo.all(from r in Respondent, where: r.survey_id == ^survey.id)
+      assert length(all) == respondents_count
+
+      conn = delete conn, project_survey_respondent_group_path(conn, :delete, survey.project.id, survey.id, group.id)
+      assert response(conn, 422)
+
+      group = RespondentGroup |> Repo.get_by(survey_id: survey.id)
+      assert group
+
+      all = Repo.all(from r in Respondent, where: r.survey_id == ^survey.id)
+      assert length(all) == respondents_count
+    end
+
     test "updates project updated_at when deleting", %{conn: conn, user: user}  do
-      datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-      project = insert(:project, updated_at: datetime)
-      insert(:project_membership, user: user, project: project, level: "owner")
+      {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+      project = create_project_for_user(user, updated_at: datetime)
       survey = insert(:survey, project: project)
       group = insert(:respondent_group, survey: survey)
 
       delete conn, project_survey_respondent_group_path(conn, :delete, survey.project.id, survey.id, group.id)
 
       project = Project |> Repo.get(project.id)
-      assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+      assert DateTime.compare(project.updated_at, datetime) == :gt
     end
 
-    test "forbids the deleteion of a group if the project is from another user", %{conn: conn} do
+    test "forbids the deletion of a group if the project is from another user", %{conn: conn} do
       project = insert(:project)
       survey = insert(:survey, project: project)
       group = insert(:respondent_group, survey: survey)
@@ -327,9 +412,20 @@ defmodule Ask.RespondentGroupControllerTest do
       end
     end
 
-    test "forbids the deleteion of a group for project reader", %{conn: conn, user: user} do
+    test "forbids the deletion of a group for project reader", %{conn: conn, user: user} do
       project = insert(:project)
       insert(:project_membership, user: user, project: project, level: "reader")
+      survey = insert(:survey, project: project)
+      group = insert(:respondent_group, survey: survey)
+
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_respondent_group_path(conn, :delete, survey.project.id, survey.id, group.id)
+      end
+    end
+
+    test "forbids the deletion of a group if project is archived", %{conn: conn, user: user} do
+      project = insert(:project, archived: true)
+      insert(:project_membership, user: user, project: project, level: "owner")
       survey = insert(:survey, project: project)
       group = insert(:respondent_group, survey: survey)
 
@@ -361,9 +457,19 @@ defmodule Ask.RespondentGroupControllerTest do
   end
 
   describe "add" do
-    test "uploads CSV with more resopndents", %{conn: conn, user: user} do
+    test "uploads CSV with more respondents", %{conn: conn, user: user} do
       project = create_project_for_user(user)
       survey = insert(:survey, project: project)
+      perform_add_test_for_survey(conn, project, survey)
+    end
+
+    test "uploads CSV with more respondents even if the survey is running", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project, state: "running")
+      perform_add_test_for_survey(conn, project, survey)
+    end
+
+    def perform_add_test_for_survey(conn, project, survey) do
       group = insert(:respondent_group, survey: survey, respondents_count: 2, sample: ["9988776655", "(549) 11 4234 2343"])
 
       # This doesn't exist in the uploaded csv

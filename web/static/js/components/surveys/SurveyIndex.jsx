@@ -6,16 +6,17 @@ import values from 'lodash/values'
 import * as actions from '../../actions/surveys'
 import * as surveyActions from '../../actions/survey'
 import * as projectActions from '../../actions/project'
-import { AddButton, Card, EmptyPage, UntitledIfEmpty } from '../ui'
-import { ConfirmationModal } from '../ui/ConfirmationModal'
+import { AddButton, Card, EmptyPage, UntitledIfEmpty, ConfirmationModal, PagingFooter } from '../ui'
 import * as channelsActions from '../../actions/channels'
 import * as respondentActions from '../../actions/respondents'
 import RespondentsChart from '../respondents/RespondentsChart'
 import SurveyStatus from './SurveyStatus'
 import * as routes from '../../routes'
+import { translate, Trans } from 'react-i18next'
 
 class SurveyIndex extends Component {
   static propTypes = {
+    t: PropTypes.func,
     dispatch: PropTypes.func,
     router: PropTypes.object,
     projectId: PropTypes.any.isRequired,
@@ -23,8 +24,6 @@ class SurveyIndex extends Component {
     surveys: PropTypes.array,
     startIndex: PropTypes.number.isRequired,
     endIndex: PropTypes.number.isRequired,
-    hasPreviousPage: PropTypes.bool.isRequired,
-    hasNextPage: PropTypes.bool.isRequired,
     totalCount: PropTypes.number.isRequired,
     respondentsStats: PropTypes.object.isRequired
   }
@@ -55,10 +54,15 @@ class SurveyIndex extends Component {
 
   deleteSurvey = (survey: Survey) => {
     const deleteConfirmationModal: ConfirmationModal = this.refs.deleteConfirmationModal
+    const { t } = this.props
     deleteConfirmationModal.open({
       modalText: <span>
-        <p>Are you sure you want to delete the survey <b><UntitledIfEmpty text={survey.name} entityName='survey' /></b>?</p>
-        <p>All the respondent information will be lost and cannot be undone.</p>
+        <p>
+          <Trans>
+            Are you sure you want to delete the survey <b><UntitledIfEmpty text={survey.name} emptyText={t('Untitled survey')} /></b>?
+          </Trans>
+        </p>
+        <p>{t('All the respondent information will be lost and cannot be undone.')}</p>
       </span>,
       onConfirm: () => {
         const { dispatch } = this.props
@@ -67,42 +71,29 @@ class SurveyIndex extends Component {
     })
   }
 
-  nextPage(e) {
+  nextPage() {
     const { dispatch } = this.props
-    e.preventDefault()
     dispatch(actions.nextSurveysPage())
   }
 
-  previousPage(e) {
+  previousPage() {
     const { dispatch } = this.props
-    e.preventDefault()
     dispatch(actions.previousSurveysPage())
   }
 
   render() {
-    const { surveys, respondentsStats, project, startIndex, endIndex, totalCount, hasPreviousPage, hasNextPage } = this.props
+    const { surveys, respondentsStats, project, startIndex, endIndex, totalCount, t } = this.props
 
     if (!surveys) {
       return (
-        <div>Loading surveys...</div>
+        <div>{t('Loading surveys...')}</div>
       )
     }
 
-    const footer = (
-      <div className='card-action right-align'>
-        <ul className='pagination'>
-          <li style={{lineHeight: 2}}><span className='grey-text'>{startIndex}-{endIndex} of {totalCount}</span></li>
-          { hasPreviousPage
-            ? <li><a href='#!' onClick={e => this.previousPage(e)}><i className='material-icons'>chevron_left</i></a></li>
-            : <li className='disabled'><i className='material-icons'>chevron_left</i></li>
-          }
-          { hasNextPage
-            ? <li><a href='#!' onClick={e => this.nextPage(e)}><i className='material-icons'>chevron_right</i></a></li>
-            : <li className='disabled'><i className='material-icons'>chevron_right</i></li>
-          }
-        </ul>
-      </div>
-    )
+    const footer = <PagingFooter
+      {...{startIndex, endIndex, totalCount}}
+      onPreviousPage={() => this.previousPage()}
+      onNextPage={() => this.nextPage()} />
 
     const readOnly = !project || project.readOnly
 
@@ -117,17 +108,17 @@ class SurveyIndex extends Component {
       <div>
         {addButton}
         { surveys.length == 0
-        ? <EmptyPage icon='assignment_turned_in' title='You have no surveys on this project' onClick={(e) => this.newSurvey(e)} />
+        ? <EmptyPage icon='assignment_turned_in' title={t('You have no surveys on this project')} onClick={(e) => this.newSurvey(e)} readOnly={readOnly} createText={t('Create one', {context: 'survey'})} />
         : <div className='row'>
           { surveys.map(survey => {
             return (
-              <SurveyCard survey={survey} respondentsStats={respondentsStats[survey.id]} onDelete={this.deleteSurvey} key={survey.id} />
+              <SurveyCard survey={survey} respondentsStats={respondentsStats[survey.id]} onDelete={this.deleteSurvey} key={survey.id} readOnly={readOnly} t={t} />
             )
           }) }
           { footer }
         </div>
         }
-        <ConfirmationModal modalId='survey_index_delete' ref='deleteConfirmationModal' confirmationText='DELETE' header='Delete survey' showCancel />
+        <ConfirmationModal modalId='survey_index_delete' ref='deleteConfirmationModal' confirmationText={t('Delete')} header={t('Delete survey')} showCancel />
       </div>
     )
   }
@@ -151,8 +142,6 @@ const mapStateToProps = (state, ownProps) => {
   }
   const startIndex = Math.min(totalCount, pageIndex + 1)
   const endIndex = Math.min(pageIndex + pageSize, totalCount)
-  const hasPreviousPage = startIndex > 1
-  const hasNextPage = endIndex < totalCount
 
   return {
     projectId: ownProps.params.projectId,
@@ -162,23 +151,23 @@ const mapStateToProps = (state, ownProps) => {
     respondentsStats: state.respondentsStats,
     startIndex,
     endIndex,
-    hasPreviousPage,
-    hasNextPage,
     totalCount
   }
 }
 
-export default withRouter(connect(mapStateToProps)(SurveyIndex))
+export default translate()(withRouter(connect(mapStateToProps)(SurveyIndex)))
 
 class SurveyCard extends PureComponent {
   props: {
+    t: Function,
     respondentsStats: Object,
     survey: Survey,
-    onDelete: (survey: Survey) => void
+    onDelete: (survey: Survey) => void,
+    readOnly: boolean
   };
 
   render() {
-    const { survey, respondentsStats, onDelete } = this.props
+    const { survey, respondentsStats, onDelete, readOnly, t } = this.props
 
     var deleteButton = null
     if (survey.state != 'running') {
@@ -187,8 +176,8 @@ class SurveyCard extends PureComponent {
         onDelete(survey)
       }
 
-      deleteButton =
-        <span onClick={onDeleteClick} className='right card-hover grey-text'>
+      deleteButton = readOnly ? null
+        : <span onClick={onDeleteClick} className='right card-hover grey-text'>
           <i className='material-icons'>delete</i>
         </span>
     }
@@ -202,14 +191,14 @@ class SurveyCard extends PureComponent {
           <Card>
             <div className='card-content'>
               <div className='grey-text'>
-                { String(Math.round(completionPercentage)) + '% of target completed' }
+                {t('{{percentage}}% of target completed', {percentage: String(Math.round(completionPercentage))})}
               </div>
               <div className='card-chart'>
                 <RespondentsChart cumulativePercentages={cumulativePercentages} />
               </div>
               <div className='card-status'>
                 <span className='card-title truncate' title={survey.name}>
-                  <UntitledIfEmpty text={survey.name} entityName='survey' />
+                  <UntitledIfEmpty text={survey.name} emptyText={t('Untitled survey')} />
                   {deleteButton}
                 </span>
                 <SurveyStatus survey={survey} short />

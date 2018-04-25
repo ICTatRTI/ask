@@ -12,7 +12,9 @@ import uniqWith from 'lodash/uniqWith'
 import every from 'lodash/every'
 import some from 'lodash/some'
 import without from 'lodash/without'
-import React from 'react'
+import filter from 'lodash/filter'
+
+const k = (...args: any) => args
 
 export const dataReducer = (state: Survey, action: any): Survey => {
   switch (action.type) {
@@ -39,6 +41,9 @@ export const dataReducer = (state: Survey, action: any): Survey => {
     case actions.CHANGE_SMS_RETRY_CONFIGURATION: return changeSmsRetryConfiguration(state, action)
     case actions.CHANGE_MOBILEWEB_RETRY_CONFIGURATION: return changeMobileWebRetryConfiguration(state, action)
     case actions.CHANGE_FALLBACK_DELAY: return changeFallbackDelay(state, action)
+    case actions.RECEIVE_LINK: return receiveLink(state, action)
+    case actions.REFRESH_LINK: return refreshLink(state, action)
+    case actions.DELETE_LINK: return deleteLink(state, action)
     case actions.SAVED: return saved(state, action)
     default: return state
   }
@@ -52,7 +57,17 @@ const validateReducer = (reducer: StoreReducer<Survey>): StoreReducer<Survey> =>
   }
 }
 
-export default validateReducer(fetchReducer(actions, dataReducer))
+const dirtyPredicate = (action, oldData, newData) => {
+  switch (action.type) {
+    case actions.RECEIVE_LINK: return false
+    case actions.REFRESH_LINK: return false
+    case actions.DELETE_LINK: return false
+    case actions.CHANGE_NAME: return false
+    default: return true
+  }
+}
+
+export default validateReducer(fetchReducer(actions, dataReducer, null, dirtyPredicate))
 
 const validate = (state) => {
   state.errorsByPath = {}
@@ -80,7 +95,7 @@ const validateRetry = (state: DataStore<Survey>, mode, key) => {
   values = values.filter((v) => v)
   const invalid = values.some((v) => !timeSpecRegex.test(v))
   if (invalid) {
-    state.errorsByPath[key] = ['Re-contact configuration is invalid']
+    state.errorsByPath[key] = [k('Re-contact configuration is invalid')]
   }
 }
 
@@ -100,7 +115,7 @@ const validateFallbackDelay = (state: DataStore<Survey>) => {
 
   const invalid = !timeSpecRegex.test(fallbackDelay)
   if (invalid) {
-    state.errorsByPath.fallbackDelay = ['Fallback delay is invalid']
+    state.errorsByPath.fallbackDelay = [k('Fallback delay is invalid')]
   }
 }
 
@@ -246,64 +261,6 @@ export const rebuildInputFromQuotaBuckets = (store: string, survey: Survey) => {
   return conditions.join()
 }
 
-export const labelFor = (mode: string) => {
-  if (mode == 'sms') {
-    return 'SMS'
-  }
-  if (mode == 'ivr') {
-    return 'Phone call'
-  }
-  if (mode == 'mobileweb') {
-    return 'Mobile Web'
-  }
-  return 'Unknown mode'
-}
-
-export const iconFor = (mode: string) => {
-  if (mode == 'sms') {
-    return (<i className='material-icons v-middle icon-text '>sms</i>)
-  }
-  if (mode == 'ivr') {
-    return (<i className='material-icons v-middle icon-text '>phone</i>)
-  }
-  if (mode == 'mobileweb') {
-    return (<i className='material-icons v-middle icon-text '>phone_android</i>)
-  }
-  return null
-}
-
-export const modeLabel = (mode: string[]) => {
-  if (isEqual(mode, ['sms'])) {
-    return 'SMS'
-  }
-  if (isEqual(mode, ['sms', 'ivr'])) {
-    return 'SMS with phone call fallback'
-  }
-  if (isEqual(mode, ['sms', 'mobileweb'])) {
-    return 'SMS with Mobile Web fallback'
-  }
-  if (isEqual(mode, ['ivr'])) {
-    return 'Phone call'
-  }
-  if (isEqual(mode, ['ivr', 'sms'])) {
-    return 'Phone call with SMS fallback'
-  }
-  if (isEqual(mode, ['ivr', 'mobileweb'])) {
-    return 'Phone call with Mobile Web fallback'
-  }
-  if (isEqual(mode, ['mobileweb'])) {
-    return 'Mobile Web'
-  }
-  if (isEqual(mode, ['mobileweb', 'sms'])) {
-    return 'Mobile Web with SMS fallback'
-  }
-  if (isEqual(mode, ['mobileweb', 'ivr'])) {
-    return 'Mobile Web with phone call fallback'
-  }
-
-  return 'Unknown mode'
-}
-
 const saved = (state, action) => {
   return {
     ...state,
@@ -438,6 +395,10 @@ const selectMode = (state, action) => {
   let stateMode = state.mode || []
   let modeComparison = stateMode.length > 1 || state.modeComparison
 
+  if (isEqual(action.mode, state.mode)) {
+    return state
+  }
+
   if (modeComparison) {
     let mode = state.mode || []
     if (some(mode, m => isEqual(m, action.mode))) {
@@ -447,7 +408,11 @@ const selectMode = (state, action) => {
       newMode.push(action.mode)
     }
   } else {
-    newMode = [action.mode]
+    if (action.mode.length > 0) {
+      newMode = [action.mode]
+    } else {
+      newMode = []
+    }
   }
 
   return {
@@ -556,5 +521,32 @@ const changeFallbackDelay = (state, action) => {
   return {
     ...state,
     fallbackDelay: action.fallbackDelay
+  }
+}
+
+const receiveLink = (state, action) => {
+  return {
+    ...state,
+    links: [
+      ...state.links,
+      action.link
+    ]
+  }
+}
+
+const refreshLink = (state, action) => {
+  return {
+    ...state,
+    links: [
+      ...filter(state.links, (link) => link.name != action.link.name),
+      action.link
+    ]
+  }
+}
+
+const deleteLink = (state, action) => {
+  return {
+    ...state,
+    links: without(state.links, action.link)
   }
 }

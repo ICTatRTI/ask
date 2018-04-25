@@ -179,6 +179,7 @@ const bareSurvey: Survey = {
   fallbackDelay: '',
   modeComparison: false,
   questionnaireComparison: false,
+  links: [],
   quotas: {
     vars: [],
     buckets: []
@@ -194,6 +195,7 @@ const bareChannel: Channel = {
   userId: 1,
   name: 'Channel Name',
   type: 'sms',
+  projects: [],
   provider: 'nuntium',
   settings: {
     nuntiumChannel: 'Nuntium Channel Name'

@@ -5,9 +5,11 @@ import * as actions from '../../actions/survey'
 import * as questionnaireActions from '../../actions/questionnaire'
 import * as routes from '../../routes'
 import { UntitledIfEmpty } from '../ui'
+import { translate } from 'react-i18next'
 
 class SurveyWizardQuestionnaireStep extends Component {
   static propTypes = {
+    t: PropTypes.func,
     survey: PropTypes.object.isRequired,
     questionnaires: PropTypes.object,
     projectId: PropTypes.any.isRequired,
@@ -40,9 +42,10 @@ class SurveyWizardQuestionnaireStep extends Component {
   }
 
   newQuestionnaireButton(projectId, questionnaires) {
-    let buttonLabel = 'NEW QUESTIONNAIRE'
+    const { t } = this.props
+    let buttonLabel = t('New questionnaire')
     if (Object.keys(questionnaires).length == 0) {
-      buttonLabel = 'Create a questionnaire'
+      buttonLabel = t('Create a questionnaire')
     }
 
     return (
@@ -60,7 +63,7 @@ class SurveyWizardQuestionnaireStep extends Component {
   }
 
   render() {
-    const { questionnaires, projectId, survey, readOnly } = this.props
+    const { questionnaires, projectId, survey, readOnly, t } = this.props
 
     const questionnaireIds = survey.questionnaireIds || []
     const questionnaireComparison = (questionnaireIds.length > 1) ? true : (!!survey.questionnaireComparison)
@@ -76,10 +79,8 @@ class SurveyWizardQuestionnaireStep extends Component {
       <div>
         <div className='row'>
           <div className='col s12'>
-            <h4>Select a questionnaire</h4>
-            <p className='flow-text'>
-              The selected questionnaire will be sent over the survey channels to every respondent until a cutoff rule is reached. If you wish, you can try an experiment to compare questionnaires performance.
-            </p>
+            <h4>{t('Select a questionnaire')}</h4>
+            <p className='flow-text'>{t('The selected questionnaire will be sent over the survey channels to every respondent until a cutoff rule is reached. If you wish, you can try an experiment to compare questionnaires performance.')}</p>
           </div>
         </div>
         <div className='row'>
@@ -93,7 +94,7 @@ class SurveyWizardQuestionnaireStep extends Component {
                 className='filled-in'
                 disabled={readOnly}
                 />
-              <label htmlFor='questionnaires_comparison'>Run a comparison with different questionnaires (you can setup the allocations later in the Comparisons section)</label>
+              <label htmlFor='questionnaires_comparison'>{t('Run a comparison with different questionnaires (you can setup the allocations later in the Comparisons section)')}</label>
             </p>
           </div>
           <div className='col s12 survey-questionnaires'>
@@ -113,7 +114,7 @@ class SurveyWizardQuestionnaireStep extends Component {
                       onChange={e => this.questionnaireChange(e)}
                       disabled={readOnly}
                     />
-                    <label htmlFor={questionnaireId}><UntitledIfEmpty text={questionnaires[questionnaireId].name} entityName='questionnaire' className={className} /></label>
+                    <label htmlFor={questionnaireId}><UntitledIfEmpty text={questionnaires[questionnaireId].name} emptyText={t('Untitled questionnaire')} className={className} /></label>
                   </p>
                 </div>
               )
@@ -126,4 +127,4 @@ class SurveyWizardQuestionnaireStep extends Component {
   }
 }
 
-export default withRouter(connect()(SurveyWizardQuestionnaireStep))
+export default translate()(withRouter(connect()(SurveyWizardQuestionnaireStep)))

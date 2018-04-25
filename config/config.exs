@@ -5,9 +5,17 @@
 # is restricted to this project.
 use Mix.Config
 
+config :plug, :types, %{
+  "application/vnd.api+json" => ["json-api"]
+}
+
 # General application configuration
 config :ask,
   ecto_repos: [Ask.Repo]
+
+if System.get_env("DISABLE_REPO_TIMEOUT") == "true" do
+  config :ask, Ask.Repo, timeout: :infinity
+end
 
 # Configures the endpoint
 config :ask, Ask.Endpoint,
@@ -18,32 +26,17 @@ config :ask, Ask.Endpoint,
   pubsub: [name: Ask.PubSub,
            adapter: Phoenix.PubSub.PG2]
 
-config :ask, Nuntium,
-  base_url: System.get_env("NUNTIUM_BASE_URL") || "",
-  guisso: [
-    base_url: System.get_env("NUNTIUM_GUISSO_BASE_URL") || "",
-    client_id: System.get_env("NUNTIUM_CLIENT_ID") || "",
-    client_secret: System.get_env("NUNTIUM_CLIENT_SECRET") || "",
-    app_id: System.get_env("NUNTIUM_APP_ID") || ""
-  ]
-
-config :ask, Verboice,
-  base_url: System.get_env("VERBOICE_BASE_URL") || "",
-  guisso: [
-    base_url: System.get_env("VERBOICE_GUISSO_BASE_URL") || "",
-    client_id: System.get_env("VERBOICE_CLIENT_ID") || "",
-    client_secret: System.get_env("VERBOICE_CLIENT_SECRET") || "",
-    app_id: System.get_env("VERBOICE_APP_ID") || ""
-  ]
-
 config :ask, :channel,
   providers: %{
     "nuntium" => Ask.Runtime.NuntiumChannel,
     "verboice" => Ask.Runtime.VerboiceChannel
   }
 
+config :ask, Ask.FloipPusher,
+  poll_interval_in_minutes: {:system, "FLOIP_PUSHER_POLL_INTERVAL_IN_MINUTES", 15}
+
 config :ask, Ask.Runtime.Broker,
-  batch_size: {:system, "BROKER_BATCH_SIZE", 10},
+  batch_size: {:system, "BROKER_BATCH_SIZE", 10000},
   batch_limit_per_minute: {:system, "BROKER_BATCH_LIMIT_PER_MINUTE", 100},
   initial_valid_respondent_rate: {:system, "INITIAL_VALID_RESPONDENT_RATE", 100},
   initial_eligibility_rate: {:system, "INITIAL_ELIGIBILITY_RATE", 100},
@@ -67,11 +60,13 @@ end
 
 config :ask, version: version
 
+sentry_enabled = String.length(System.get_env("SENTRY_DSN") || "") > 0
+
 config :sentry,
   dsn: System.get_env("SENTRY_DSN"),
   public_dsn: System.get_env("SENTRY_PUBLIC_DSN"),
   environment_name: Mix.env || :dev,
-  included_environments: ~w(prod)a,
+  included_environments: (if sentry_enabled, do: ~w(prod)a, else: []),
   use_error_logger: true,
   enable_source_code_context: false,
   release: version

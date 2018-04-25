@@ -1,15 +1,15 @@
-import React, { Component } from 'react'
+import React, { Component, PropTypes } from 'react'
 import { UntitledIfEmpty } from '.'
+import classNames from 'classnames/bind'
 
 export class EditableTitleLabel extends Component {
   static propTypes = {
-    onSubmit: React.PropTypes.func.isRequired,
-    title: React.PropTypes.string,
-    emptyText: React.PropTypes.string,
-    entityName: React.PropTypes.string,
-    editing: React.PropTypes.bool,
-    readOnly: React.PropTypes.bool,
-    more: React.PropTypes.node
+    onSubmit: PropTypes.func.isRequired,
+    title: PropTypes.string,
+    emptyText: PropTypes.string.isRequired,
+    editing: PropTypes.bool,
+    readOnly: PropTypes.bool,
+    more: PropTypes.node
   }
 
   constructor(props) {
@@ -45,18 +45,18 @@ export class EditableTitleLabel extends Component {
   }
 
   render() {
-    const { title, emptyText, entityName, more } = this.props
+    const { title, emptyText, more } = this.props
 
     let icon = null
-    if (!title || title.trim() == '') {
+    if ((!title || title.trim() == '') && !this.props.readOnly) {
       icon = <i className='material-icons'>mode_edit</i>
     }
 
     if (!this.state.editing) {
       return (
         <div className='title'>
-          <a className='page-title truncate' onClick={e => this.handleClick(e)}>
-            <UntitledIfEmpty text={title} emptyText={emptyText} entityName={entityName} />
+          <a className={classNames({'page-title': true, 'truncate': (title && title.trim() != '')})} onClick={e => this.handleClick(e)}>
+            <UntitledIfEmpty text={title} emptyText={emptyText} />
             {icon}
           </a>
           {more}

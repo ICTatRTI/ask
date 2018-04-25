@@ -3,11 +3,12 @@ import * as actions from '../../actions/questionnaire'
 import React, { Component } from 'react'
 import { connect } from 'react-redux'
 import 'materialize-autocomplete'
-import iso6393 from 'iso-639-3'
+import { translateLangCode } from '../timezones/util'
 import classNames from 'classnames/bind'
 import AddLanguage from './AddLanguage'
 import { hasErrorsInLanguage } from '../../questionnaireErrors'
 import withQuestionnaire from './withQuestionnaire'
+import { translate } from 'react-i18next'
 
 type Props = {
   defaultLanguage: string,
@@ -16,6 +17,7 @@ type Props = {
   errors: ValidationError[],
   onRemoveLanguage: Function,
   dispatch: Function,
+  t: Function,
   readOnly: boolean
 };
 
@@ -28,11 +30,6 @@ class LanguagesList extends Component {
       const { dispatch } = props
       dispatch(actions.setDefaultLanguage(lang))
     }
-  }
-
-  translateLangCode(code) {
-    const language = iso6393.find((lang) => lang.iso6391 == code || lang.iso6393 == code)
-    return language.name
   }
 
   setActiveLanguage(e, language) {
@@ -73,7 +70,7 @@ class LanguagesList extends Component {
   }
 
   render() {
-    const { languages, defaultLanguage, readOnly } = this.props
+    const { languages, defaultLanguage, readOnly, t } = this.props
 
     const LanguageSection = ({title, children}) =>
       <div className='row'>
@@ -84,19 +81,19 @@ class LanguagesList extends Component {
       </div>
 
     let otherLanguages = languages.filter((lang) => lang !== defaultLanguage)
-      .map((lang: string) => [lang, this.translateLangCode(lang)])
+      .map((lang: string) => [lang, translateLangCode(lang)])
       .sort(([c1, n1], [c2, n2]) => n1.localeCompare(n2))
       .map(([code, name]) => this.renderLanguageRow(code, name))
 
     let otherLanguagesComponent = null
     if (otherLanguages.length != 0) {
-      otherLanguagesComponent = <LanguageSection title='Other languages'>{otherLanguages}</LanguageSection>
+      otherLanguagesComponent = <LanguageSection title={t('Other languages')}>{otherLanguages}</LanguageSection>
     }
 
     return (
       <div className='languages'>
-        <LanguageSection title='Primary language'>
-          {this.renderLanguageRow(defaultLanguage, this.translateLangCode(defaultLanguage), true)}
+        <LanguageSection title={t('Primary language')}>
+          {this.renderLanguageRow(defaultLanguage, translateLangCode(defaultLanguage), true)}
         </LanguageSection>
         {otherLanguagesComponent}
         {readOnly
@@ -117,4 +114,4 @@ const mapStateToProps = (state, ownProps) => ({
   errors: state.questionnaire.errors
 })
 
-export default withQuestionnaire(connect(mapStateToProps)(LanguagesList))
+export default translate()(withQuestionnaire(connect(mapStateToProps)(LanguagesList)))

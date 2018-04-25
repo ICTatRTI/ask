@@ -17,6 +17,7 @@ import TestQuestionnaireModal from './TestQuestionnaireModal'
 import { Dropdown, DropdownItem, PositionFixer, Tooltip } from '../ui'
 import { hasErrorsInModeWithLanguage } from '../../questionnaireErrors'
 import classNames from 'classnames/bind'
+import { translate } from 'react-i18next'
 
 type State = {
   isNew: boolean
@@ -214,10 +215,12 @@ class QuestionnaireEditor extends Component {
   addModeComponent(sms, ivr, mobileweb) {
     if (sms && ivr && mobileweb) return null
 
+    const { t } = this.props
+
     const label = (
       <span>
         <i className='material-icons v-middle left'>add</i>
-        <span className='mode-label'>Add</span>
+        <span className='mode-label'>{t('Add')}</span>
       </span>
     )
 
@@ -225,9 +228,9 @@ class QuestionnaireEditor extends Component {
       <div className='row add-mode'>
         <div className='col s12'>
           <Dropdown label={label} dataBelowOrigin={false}>
-            { this.addModeSubcomponent('sms', 'SMS', 'sms', !sms) }
-            { this.addModeSubcomponent('ivr', 'Phone call', 'phone', !ivr) }
-            { this.addModeSubcomponent('mobileweb', 'Mobile web', 'phonelink', !mobileweb) }
+            { this.addModeSubcomponent('sms', t('SMS'), 'sms', !sms) }
+            { this.addModeSubcomponent('ivr', t('Phone call'), 'phone', !ivr) }
+            { this.addModeSubcomponent('mobileweb', t('Mobile web'), 'phonelink', !mobileweb) }
           </Dropdown>
         </div>
       </div>
@@ -241,7 +244,7 @@ class QuestionnaireEditor extends Component {
   }
 
   render() {
-    const { questionnaire, errors, project, readOnly, userSettings, errorsByPath, selectedSteps, selectedQuotaCompletedSteps } = this.props
+    const { questionnaire, errors, project, readOnly, userSettings, errorsByPath, selectedSteps, selectedQuotaCompletedSteps, t } = this.props
 
     if (questionnaire == null || project == null || userSettings.settings == null) {
       return <div>Loading...</div>
@@ -276,11 +279,11 @@ class QuestionnaireEditor extends Component {
               <LanguagesList onRemoveLanguage={(lang) => this.removeLanguage(lang)} readOnly={readOnly} />
               <div className='row'>
                 <div className='col s12'>
-                  <p className='grey-text'>Modes</p>
+                  <p className='grey-text'>{t('Modes')}</p>
                   <ul className='modes-list'>
-                    { this.modeComponent('sms', 'SMS', 'sms', sms) }
-                    { this.modeComponent('ivr', 'Phone call', 'phone', ivr) }
-                    { this.modeComponent('mobileweb', 'Mobile web', 'phonelink', mobileweb) }
+                    { this.modeComponent('sms', t('SMS'), 'sms', sms) }
+                    { this.modeComponent('ivr', t('Phone call'), 'phone', ivr) }
+                    { this.modeComponent('mobileweb', t('Mobile web'), 'phonelink', mobileweb) }
                   </ul>
                   { this.addModeComponent(sms, ivr, mobileweb) }
                 </div>
@@ -288,70 +291,71 @@ class QuestionnaireEditor extends Component {
             </PositionFixer>
           </div>
           {skipOnboarding
-        ? <div className='col s12 m8 offset-m1'>
-          <QuestionnaireSteps
-            ref='stepsComponent'
-            steps={questionnaire.steps}
-            errorPath='steps'
-            errorsByPath={errorsByPath}
-            onDeleteStep={this.deleteStep}
-            onSelectStep={this.selectStep}
-            onDeselectStep={this.deselectStep}
-            readOnly={readOnly}
-            selectedSteps={selectedSteps}
+            ? <div className='col s12 m8 offset-m1'>
+              <QuestionnaireSteps
+                ref='stepsComponent'
+                steps={questionnaire.steps}
+                errorPath='steps'
+                errorsByPath={errorsByPath}
+                onDeleteStep={this.deleteStep}
+                onSelectStep={this.selectStep}
+                onDeselectStep={this.deselectStep}
+                readOnly={readOnly}
+                selectedSteps={selectedSteps}
             />
-          {readOnly ? null
-          : <div className='row'>
-            <div className='col s12'>
-              <a href='#!' className='btn-flat blue-text no-padd' onClick={e => this.questionnaireAddStep(e)}>Add Step</a>
-            </div>
-          </div>
-          }
-          <div className='row'>
-            <div className='col s12'>
-              <div className='switch'>
-                <label>
-                  <input type='checkbox' checked={hasQuotaCompletedSteps} onChange={e => this.toggleQuotaCompletedSteps(e)} disabled={readOnly} />
-                  <span className='lever' />
-                </label>
-                Quota completed steps
+              {readOnly
+                ? null
+                : <div className='row'>
+                  <div className='col s12'>
+                    <a href='#!' className='btn-flat blue-text no-padd' onClick={e => this.questionnaireAddStep(e)}>{t('Add Step')}</a>
+                  </div>
+                </div>
+              }
+              <div className='row'>
+                <div className='col s12'>
+                  <div className='switch'>
+                    <label>
+                      <input type='checkbox' checked={hasQuotaCompletedSteps} onChange={e => this.toggleQuotaCompletedSteps(e)} disabled={readOnly} />
+                      <span className='lever' />
+                    </label>
+                    {t('Quota completed steps')}
+                  </div>
+                </div>
               </div>
+              {hasQuotaCompletedSteps
+                ? <QuestionnaireSteps
+                  ref='quotaCompletedStepsComponent'
+                  quotaCompletedSteps
+                  steps={questionnaire.quotaCompletedSteps}
+                  errorPath='quotaCompletedSteps'
+                  errorsByPath={errorsByPath}
+                  onDeleteStep={this.deleteQuotaCompletedStep}
+                  onSelectStep={this.selectQuotaCompletedStep}
+                  onDeselectStep={this.deselectQuotaCompletedStep}
+                  readOnly={readOnly}
+                  selectedSteps={selectedQuotaCompletedSteps}
+                  />
+                : null}
+              {!readOnly && hasQuotaCompletedSteps
+                ? <div className='row'>
+                  <div className='col s12'>
+                    <a href='#!' className='btn-flat blue-text no-padd' onClick={e => this.questionnaireAddQuotaCompletedStep(e)}>{t('Add Quota Completed Step')}</a>
+                  </div>
+                </div>
+                : null
+              }
+              { questionnaire.activeMode == 'sms'
+                ? <SmsSettings readOnly={readOnly} />
+                : null }
+              { questionnaire.activeMode == 'ivr'
+                ? <PhoneCallSettings readOnly={readOnly} />
+                : null }
+              { questionnaire.activeMode == 'mobileweb'
+                ? <WebSettings readOnly={readOnly} />
+                : null }
             </div>
-          </div>
-          {hasQuotaCompletedSteps
-          ? <QuestionnaireSteps
-            ref='quotaCompletedStepsComponent'
-            quotaCompletedSteps
-            steps={questionnaire.quotaCompletedSteps}
-            errorPath='quotaCompletedSteps'
-            errorsByPath={errorsByPath}
-            onDeleteStep={this.deleteQuotaCompletedStep}
-            onSelectStep={this.selectQuotaCompletedStep}
-            onDeselectStep={this.deselectQuotaCompletedStep}
-            readOnly={readOnly}
-            selectedSteps={selectedQuotaCompletedSteps}
-            />
-          : null}
-          {!readOnly && hasQuotaCompletedSteps
-          ? <div className='row'>
-            <div className='col s12'>
-              <a href='#!' className='btn-flat blue-text no-padd' onClick={e => this.questionnaireAddQuotaCompletedStep(e)}>Add Quota Completed Step</a>
-            </div>
-          </div>
-          : null
-          }
-          { questionnaire.activeMode == 'sms'
-          ? <SmsSettings readOnly={readOnly} />
-          : null }
-          { questionnaire.activeMode == 'ivr'
-          ? <PhoneCallSettings readOnly={readOnly} />
-          : null }
-          { questionnaire.activeMode == 'mobileweb'
-          ? <WebSettings readOnly={readOnly} />
-          : null }
-        </div>
-        : <QuestionnaireOnboarding onDismiss={() => this.onOnboardingDismiss()} />
-        }
+            : <QuestionnaireOnboarding onDismiss={() => this.onOnboardingDismiss()} />
+            }
         </div>
       </div>
     )
@@ -363,6 +367,7 @@ QuestionnaireEditor.propTypes = {
   uiActions: PropTypes.object.isRequired,
   questionnaireActions: PropTypes.object.isRequired,
   userSettingsActions: PropTypes.object.isRequired,
+  t: PropTypes.func,
   router: PropTypes.object,
   project: PropTypes.object,
   userSettings: PropTypes.object,
@@ -397,4 +402,4 @@ const mapDispatchToProps = (dispatch) => ({
   uiActions: bindActionCreators(uiActions, dispatch)
 })
 
-export default withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireEditor))
+export default translate()(withRouter(connect(mapStateToProps, mapDispatchToProps)(QuestionnaireEditor)))

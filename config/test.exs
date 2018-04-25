@@ -7,8 +7,9 @@ config :ask, Ask.Endpoint,
   server: false,
   url: [host: "app.ask.dev", port: 80]
 
-# Print only warnings and errors during test
-config :logger, level: :warn
+# Print only info messages during testing so
+# we get an idea of log quality.
+config :logger, level: :info
 
 # Configure your database
 config :ask, Ask.Repo,
@@ -18,6 +19,9 @@ config :ask, Ask.Repo,
   database: "ask_test",
   hostname: System.get_env("DATABASE_HOST") || "localhost",
   pool: Ecto.Adapters.SQL.Sandbox
+
+config :ask, Ask.Runtime.Broker,
+  batch_size: 10
 
 config :ask, :channel,
   providers: %{

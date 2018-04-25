@@ -7,16 +7,18 @@ defmodule Ask.ProjectView do
       one = render_one(project)
       one
       |> Map.put(:running_surveys, Map.get(running_surveys_by_project, project.id, 0))
-      |> Map.put(:read_only, level == "reader")
+      |> Map.put(:read_only, level == "reader" || project.archived)
       |> Map.put(:owner, level == "owner")
+      |> Map.put(:level, level)
     end)
     %{data: rendered}
   end
 
-  def render("show.json", %{project: project, read_only: read_only, owner: owner}) do
+  def render("show.json", %{project: project, read_only: read_only, owner: owner, level: level}) do
     rendered = render_one(project, Ask.ProjectView, "project.json")
-    |> Map.put(:read_only, read_only)
-    |> Map.put(:owner, owner)
+      |> Map.put(:read_only, read_only)
+      |> Map.put(:owner, owner)
+      |> Map.put(:level, level)
     %{data: rendered}
   end
 
@@ -33,6 +35,21 @@ defmodule Ask.ProjectView do
       role: collaborator.level,
       invited: collaborator.invited,
       code: collaborator.code
+    }
+  end
+
+  def render("activities.json", %{activities: activities, activities_count: activities_count}) do
+    %{data: %{activities: render_many(activities, Ask.ProjectView, "activity.json", as: :activity)}, meta: %{count: activities_count}}
+  end
+
+  def render("activity.json", %{activity: activity}) do
+    %{user_name: (if activity.user, do: activity.user.name, else: nil),
+      remote_ip: activity.remote_ip,
+      action: activity.action,
+      entity_type: activity.entity_type,
+      metadata: activity.metadata,
+      id: activity.id,
+      inserted_at: activity.inserted_at
     }
   end
 

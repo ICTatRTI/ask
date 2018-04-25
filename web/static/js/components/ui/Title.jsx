@@ -1,11 +1,13 @@
 import React, { PropTypes } from 'react'
 import { Link } from 'react-router'
+import Undo from './Undo'
 import SaveStatus from '../layout/SaveStatus'
+import { translate } from 'react-i18next'
 
-const Title = ({ children }) => {
+export const Title = translate()(({ children, t }) => {
   const renderChildren = () => {
     if (typeof children == 'string') {
-      return <a className='page-title'>{children}</a>
+      return <a className='page-title'>{t(children)}</a>
     } else {
       return children
     }
@@ -15,23 +17,23 @@ const Title = ({ children }) => {
     <nav id='MainNav'>
       <div className='nav-wrapper'>
         <div className='row'>
-          <div className='col s9'>
+          <div className='col s8'>
             <div className='logo'>
               <Link className='logo-container' to='/' />
             </div>
             {renderChildren()}
           </div>
-          <div className='col s3'>
+          <div className='col s4'>
+            <Undo />
             <SaveStatus />
           </div>
         </div>
       </div>
     </nav>
   )
-}
+})
 
 Title.propTypes = {
-  children: PropTypes.node
+  children: PropTypes.node,
+  t: PropTypes.func
 }
-
-export default Title

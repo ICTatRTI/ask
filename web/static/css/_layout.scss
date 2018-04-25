@@ -143,10 +143,11 @@ header {
     height: 66px;
   }
 
-  a.page-title {
+  .page-title {
     font-size: 20px;
     padding-top: 4px;
     vertical-align: middle;
+    max-width: 100%;
     display: inline-block;
     i {
       @extend .grey-text, .lighten-2;
@@ -160,6 +161,7 @@ header {
     margin: 0;
   }
   .title {
+    max-width: 100%;
     display: inline-block;
   }
   span.title-options {
@@ -187,5 +189,21 @@ footer {
   padding-bottom: 1.3rem;
   .row {
     margin-bottom: 0;
+  }
+}
+
+.undo-buttons {
+  margin-left: 4px;
+
+  i {
+    display: inline-block !important;
+    margin: 0px 8px;
+    cursor: pointer;
+    color: color("grey", "base");
+    user-select: none;
+
+    &.disabled {
+      color: color("grey", "darken-2");
+    }
   }
 }

@@ -3,7 +3,7 @@ defmodule Ask.Mixfile do
 
   def project do
     [app: :ask,
-     version: "0.13.0",
+     version: "0.17.0",
      elixir: "~> 1.5",
      elixirc_paths: elixirc_paths(Mix.env),
      compilers: [:phoenix, :gettext] ++ Mix.compilers,
@@ -55,8 +55,11 @@ defmodule Ask.Mixfile do
       {:xml_builder, "~> 0.0.9"},
       {:language_names, "~> 0.1.0"},
       {:prometheus_phoenix, "~> 1.0"},
+      {:simetric, "~> 0.1.0"},
       {:prometheus_plugs, "~> 1.1"},
-      {:alto_guisso, git: "https://github.com/instedd/alto_guisso_ex.git"}
+      {:alto_guisso, git: "https://github.com/instedd/alto_guisso_ex.git"},
+      {:pp, "~> 0.1.0", only: [:dev, :test]},
+      {:bypass, "~> 0.8", only: :test}
    ]
   end
 

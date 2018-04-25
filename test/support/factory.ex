@@ -32,7 +32,8 @@ defmodule Ask.Factory do
       schedule: Ask.Schedule.always(),
       name: sequence(:survey, &"Survey #{&1}"),
       mode: [["sms"]],
-      state: "not_ready"
+      state: "not_ready",
+      floip_package_id: Ecto.UUID.generate
     }
   end
 
@@ -149,6 +150,12 @@ defmodule Ask.Factory do
     }
   end
 
+  def floip_endpoint_factory do
+    %Ask.FloipEndpoint{
+      uri: sequence(:string, &"http://localhost:1234/#{&1}")
+    }
+  end
+
   def respondent_factory do
     phone_number = "#{Integer.to_string(:rand.uniform(100))} #{Integer.to_string(:rand.uniform(100))} #{Integer.to_string(:rand.uniform(100))}"
     respondent_group = build(:respondent_group)
@@ -156,14 +163,13 @@ defmodule Ask.Factory do
       respondent_group: respondent_group,
       survey: (respondent_group |> Ask.Repo.preload(:survey)).survey,
       phone_number: phone_number,
-      sanitized_phone_number: Ask.Respondent.sanitize_phone_number(phone_number),
-      state: "pending"
+      sanitized_phone_number: Ask.Respondent.sanitize_phone_number(phone_number)
     }
   end
 
   def response_factory do
     %Ask.Response{
-        field_name: "Smoke"
+      field_name: "Smoke"
     }
   end
 
@@ -184,6 +190,12 @@ defmodule Ask.Factory do
         "access_token" => :crypto.strong_rand_bytes(27) |> Base.encode64,
       },
       expires_at: Timex.now |> Timex.add(Timex.Duration.from_hours(1))
+    }
+  end
+
+  def activity_log_factory do
+    %Ask.ActivityLog{
+      remote_ip: "192.168.0.1"
     }
   end
 end

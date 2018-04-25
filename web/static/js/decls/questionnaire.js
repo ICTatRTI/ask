@@ -15,12 +15,12 @@ export type Questionnaire = {
 };
 
 export type Settings = {
-  errorMessage: LocalizedPrompt,
-  mobileWebSmsMessage: ?string,
-  mobileWebSurveyIsOverMessage: ?string,
+  errorMessage?: LocalizedPrompt,
+  mobileWebSmsMessage?: ?string,
+  mobileWebSurveyIsOverMessage?: ?string,
   mobileWebColorStyle?: ColorStylePrompt,
-  title: {[lang: string]: string},
-  surveyAlreadyTakenMessage: {[lang: string]: string},
+  title?: {[lang: string]: string},
+  surveyAlreadyTakenMessage?: {[lang: string]: string},
   thankYouMessage?: LocalizedPrompt,
 };
 
@@ -67,7 +67,7 @@ export type ExplanationStep = BaseStep & MultilingualStep & {
 
 export type FlagStep = BaseStep & {
   type: 'flag',
-  disposition: 'completed' | 'partial' | 'ineligible',
+  disposition: 'completed' | 'interim partial' | 'ineligible',
   skipLogic: ?string
 };
 
@@ -80,28 +80,13 @@ export type NumericStep = BaseStep & StoreStep & MultilingualStep & {
   refusal: ?Refusal
 };
 
-export type Refusal = {
-  enabled: boolean,
-  responses: {
-    ivr?: string[],
-    sms?: {
-      [lang: string]: string[]
-    },
-    mobileweb?: {
-      [lang: string]: string[]
-    }
-  },
-  skipLogic: ?string
-}
-
 export type Range = {
   from: ?number,
   to: ?number,
   skipLogic: ?string
 };
 
-export type Choice = {
-  value: string,
+export type BaseChoice = {
   skipLogic: ?string,
   responses: {
     ivr?: string[],
@@ -112,6 +97,14 @@ export type Choice = {
       [lang: string]: ?string
     }
   }
+};
+
+export type Choice = BaseChoice & {
+  value: string
+};
+
+export type Refusal = BaseChoice & {
+  enabled: boolean
 };
 
 export type Step = LanguageSelectionStep | MultipleChoiceStep | NumericStep | ExplanationStep | FlagStep;

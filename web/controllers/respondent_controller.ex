@@ -1,7 +1,18 @@
 defmodule Ask.RespondentController do
   use Ask.Web, :api_controller
+  require Ask.RespondentStats
 
-  alias Ask.{Respondent, RespondentDispositionHistory, Questionnaire, Survey, SurveyLogEntry}
+  alias Ask.{
+    ActivityLog,
+    CompletedRespondents,
+    Logger,
+    Questionnaire,
+    Respondent,
+    RespondentDispositionHistory,
+    Stats,
+    Survey,
+    SurveyLogEntry
+  }
 
   def index(conn, %{"project_id" => project_id, "survey_id" => survey_id} = params) do
     limit = Map.get(params, "limit", "")
@@ -15,41 +26,15 @@ defmodule Ask.RespondentController do
     |> Repo.get!(survey_id)
     |> assoc(:respondents)
     |> preload(:responses)
-
-    respondents_count = respondents |> Repo.aggregate(:count, :id)
-
-    respondents = respondents
     |> conditional_limit(limit)
     |> conditional_page(limit, page)
     |> sort_respondents(sort_by, sort_asc)
     |> Repo.all
     |> mask_phone_numbers
 
+    respondents_count = Ask.RespondentStats.respondent_count(survey_id: ^survey_id)
+
     render(conn, "index.json", respondents: respondents, respondents_count: respondents_count)
-  end
-
-  defp conditional_limit query, limit do
-    case limit do
-      "" -> query
-      number -> query |> limit(^number)
-    end
-  end
-
-  defp conditional_page query, limit, page do
-    limit_number = case limit do
-      "" -> 10
-      _ ->
-        {limit_value, _} = Integer.parse(limit)
-        limit_value
-    end
-
-    case page do
-      "" -> query
-      _ ->
-        {page_number, _} = Integer.parse(page)
-        offset = limit_number * (page_number - 1)
-        query |> offset(^offset)
-    end
   end
 
   defp sort_respondents(query, sort_by, sort_asc) do
@@ -67,155 +52,183 @@ defmodule Ask.RespondentController do
     end
   end
 
-  defp cumulative_percent_for(range, percent_by_date) do
-    range
-    |> Enum.reduce({percent_by_date, 0, []}, fn date, acc ->
-      {percents_by_date, cumulative_percent, cumulative_percent_by_date} = acc
-      case percents_by_date do
-        [] ->
-          {[], cumulative_percent, cumulative_percent_by_date ++ [{date, cumulative_percent}]}
-        [{next_date, next_percent} | rest_percents_by_date] ->
-          cond do
-            date < next_date ->
-              {percents_by_date, cumulative_percent, cumulative_percent_by_date ++ [{date, cumulative_percent}]}
-            date == next_date ->
-              {rest_percents_by_date, cumulative_percent + next_percent, cumulative_percent_by_date ++ [{date, cumulative_percent + next_percent}]}
-          end
-      end
-    end)
-    |> elem(2)
-  end
-
   def stats(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
-    survey = conn
-    |> load_project(project_id)
-    |> assoc(:surveys)
-    |> Repo.get!(survey_id)
+    survey =
+      conn
+      |> load_project(project_id)
+      |> assoc(:surveys)
+      |> Repo.get!(survey_id)
 
     stats(conn, survey, survey.quota_vars)
+  rescue
+    e ->
+      Logger.error "Error occurred while processing respondent stats (survey_id: #{survey_id}): #{inspect e} #{inspect System.stacktrace}"
+      Sentry.capture_exception(e, [
+        stacktrace: System.stacktrace(),
+        extra: %{survey_id: survey_id}])
+
+      render(conn, "stats.json", stats: nil)
   end
 
   defp stats(conn, survey, []) do
     questionnaires = (survey |> Repo.preload(:questionnaires)).questionnaires
-    if length(questionnaires) > 1 && length(survey.mode) > 1 do
-      reference = questionnaires
-      |> Enum.reduce([], fn(questionnaire, reference) ->
-        survey.mode
-        |> Enum.reduce(reference, fn(modes, reference) ->
-          reference ++ [%{
-            id: "#{questionnaire.id}#{modes |> Enum.join("")}",
-            name: questionnaire.name,
-            modes: modes
-          }]
-        end)
-      end)
+    respondent_count = Ask.RespondentStats.respondent_count(survey_id: ^survey.id)
 
-      stats(
-        conn,
-        survey,
-        survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
-        respondents_by_questionnaire_mode_and_disposition(survey),
-        respondents_by_questionnaire_mode_and_completed_at(survey),
-        reference,
-        [],
-        "stats.json"
-      )
-    else
-      if length(survey.mode) > 1 do
-        reference = survey.mode
-        |> Enum.map(fn(modes) ->
-          %{
-            id: modes |> Enum.join(""),
-            modes: modes
-          }
-        end)
-
+    cond do
+      length(questionnaires) > 1 && length(survey.mode) > 1 ->
         stats(
           conn,
           survey,
-          survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
+          respondent_count,
+          respondents_by_questionnaire_mode_and_disposition(survey),
+          respondents_by_questionnaire_mode_and_completed_at(survey),
+          reference(questionnaires, survey.mode),
+          [],
+          "stats.json"
+        )
+
+      length(survey.mode) > 1 ->
+        stats(
+          conn,
+          survey,
+          respondent_count,
           respondents_by_mode_and_disposition(survey),
           respondents_by_mode_and_completed_at(survey),
-          reference,
+          reference(questionnaires, survey.mode),
           [],
           "stats.json"
         )
-      else
-        reference = questionnaires
-        |> Enum.map(fn q ->
-          %{id: q.id, name: q.name}
-        end)
 
+      true ->
         stats(
           conn,
           survey,
-          survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
+          respondent_count,
           respondents_by_questionnaire_and_disposition(survey),
           respondents_by_questionnaire_and_completed_at(survey),
-          reference,
+          reference(questionnaires, survey.mode),
           [],
           "stats.json"
         )
-      end
     end
   end
 
   defp stats(conn, survey, _) do
     buckets = (survey |> Repo.preload(:quota_buckets)).quota_buckets
-
+    empty_bucket_ids = buckets |> Enum.filter(fn(bucket) -> bucket.quota in [0, nil] end) |> Enum.map(&(&1.id))
+    buckets = buckets |> Enum.reject(fn(bucket) -> bucket.quota in [0, nil] end)
+    respondent_count = Ask.RespondentStats.respondent_count(survey_id: ^survey.id)
     stats(
       conn,
       survey,
-      survey |> assoc(:respondents) |> Repo.aggregate(:count, :id),
-      respondents_by_bucket_and_disposition(survey),
-      respondents_by_quota_bucket_and_completed_at(survey),
+      respondent_count,
+      respondents_by_bucket_and_disposition(survey, empty_bucket_ids),
+      respondents_by_quota_bucket_and_completed_at(survey, empty_bucket_ids),
       buckets,
       buckets,
       "quotas_stats.json"
     )
   end
 
-  defp stats(conn, survey, total_respondents, respondents_by_disposition, respondents_by_completed_at, reference, buckets, layout) do
+  defp stats(conn, survey, total_respondents, respondents_by_disposition, respondents_by_completed_at, references, buckets, layout) do
+    target = target(survey, buckets, total_respondents)
 
+    total_respondents_by_disposition =
+      Ask.RespondentStats.respondent_count(survey_id: ^survey.id, by: :disposition)
+
+    # Completion percentage
+    contacted_respondents = total_respondents_by_disposition
+      |> Enum.filter(fn {d, _} -> d not in ["queued", "registered"] end)
+      |> Enum.map(fn {_, c} -> c end)
+      |> Enum.sum
+
+    completed_or_partial = total_respondents_by_disposition
+      |> Enum.filter(fn {d, _} -> d in ["completed", "partial"] end)
+      |> Enum.map(fn {_, c} -> c end)
+      |> Enum.sum
+
+    grouped_respondents =
+      respondents_by_completed_at
+      |> Enum.reduce(%{}, fn {group_id, date, count}, acc ->
+        {_, next_acc} =
+          acc
+          |> Map.get_and_update(group_id, fn counts_by_date ->
+            {counts_by_date, (counts_by_date || []) ++ [{date, count}]}
+          end)
+
+        next_acc
+      end)
+
+    stats = %{
+      id: survey.id,
+      reference: references,
+      respondents_by_disposition: respondent_counts(respondents_by_disposition, total_respondents),
+      cumulative_percentages: cumulative_percentages(references, grouped_respondents, survey, target, buckets),
+      completion_percentage: completed_or_partial / target * 100,
+      total_respondents: total_respondents,
+      target: target,
+      contacted_respondents: contacted_respondents
+    }
+
+    render(conn, layout, stats: stats)
+  end
+
+  defp reference([questionnaire], [modes]) do
+    [
+      %{
+        id: questionnaire.id,
+        name: questionnaire.name,
+        modes: modes
+      }
+    ]
+  end
+
+  defp reference([_], mode) do
+    mode
+    |> Enum.map(fn modes ->
+      %{
+        id: modes |> Enum.join(""),
+        modes: modes
+      }
+    end)
+  end
+
+  defp reference(questionnaires, [_]) do
+    questionnaires
+    |> Enum.map(fn q ->
+      %{id: q.id, name: q.name}
+    end)
+  end
+
+  defp reference(questionnaires, mode) do
+    questionnaires
+    |> Enum.reduce([], fn questionnaire, reference ->
+      mode
+      |> Enum.reduce(reference, fn modes, reference ->
+        reference ++
+          [
+            %{
+              id: "#{questionnaire.id}#{modes |> Enum.join("")}",
+              name: questionnaire.name,
+              modes: modes
+            }
+          ]
+      end)
+    end)
+  end
+
+  defp target(survey, buckets, total_respondents) do
     total_quota =
       buckets
       |> Enum.reduce(0, fn bucket, total ->
         total + (bucket.quota || 0)
       end)
 
-    target =
-      cond do
-        total_quota > 0 -> total_quota
-        !is_nil(survey.cutoff) -> survey.cutoff
-        true -> total_respondents
-      end
-
-    # Completion percentage
-    contacted_respondents =
-      Repo.one(
-        from r in (survey |> assoc(:respondents)),
-        where: not r.disposition in ["queued", "registered"],
-        select: count("*")
-      )
-    completed_or_partial =
-      Repo.one(
-        from r in Respondent,
-        where: r.survey_id == ^survey.id and r.disposition in ["completed", "partial"],
-        select: count("*")
-      )
-    completion_percentage = (completed_or_partial / target) * 100
-
-    stats = %{
-      id: survey.id,
-      reference: reference,
-      respondents_by_disposition: respondent_counts(respondents_by_disposition, total_respondents),
-      cumulative_percentages: cumulative_percentages(respondents_by_completed_at, survey, target),
-      completion_percentage: completion_percentage,
-      total_respondents: total_respondents,
-      contacted_respondents: contacted_respondents
-    }
-
-    render(conn, layout, stats: stats)
+    cond do
+      total_quota > 0 -> total_quota
+      !is_nil(survey.cutoff) -> survey.cutoff
+      true -> total_respondents
+    end
   end
 
   defp respondent_counts(grouped_responents, total_respondents) do
@@ -268,48 +281,145 @@ defmodule Ask.RespondentController do
     |> Enum.into(%{})
   end
 
-  defp cumulative_percentages(grouped_respondents, survey, target) do
-    # Cumulative percentages by bucket by date
-    # TODO We are only displaying completed in the chart because we don't store the partial_at date yet.
+  defp percent_provider(_group_id, [], target, []) do
+    fn count ->
+      count / target * 100
+    end
+  end
 
-    range =
-      Timex.Interval.new(from: survey.started_at, until: Timex.now)
-      |> Enum.map(fn datetime ->
-        { date, _ } = Timex.to_erl(datetime)
-        date
+  defp percent_provider(group_id, [], _target, buckets) do
+    bucket = buckets |> Enum.find(fn bucket -> bucket.id == group_id end)
+
+    fn count ->
+      count / bucket.quota * 100
+    end
+  end
+
+  defp percent_provider(group_id, comparisons, target, []) do
+    comparison =
+      comparisons
+      |> Enum.find(fn comparison ->
+        group_id == "#{comparison["questionnaire_id"]}#{comparison["mode"] |> Enum.join("")}" ||
+          group_id == comparison["questionnaire_id"] || group_id == comparison["mode"] |> Enum.join("")
       end)
 
+    fn count ->
+      count / (comparison["ratio"] * target / 100) * 100
+    end
+  end
+
+  defp cumulative_percentages(_, _, %{started_at: nil}, _, _), do: %{}
+
+  defp cumulative_percentages(references, grouped_respondents, %{started_at: started_at, comparisons: comparisons, state: state}, target, buckets) do
     grouped_respondents
-      |> Enum.reduce(%{}, fn {group_id, date, count}, acc ->
-          {_, next_acc} =
-            acc
-            |> Map.put_new(group_id, [])
-            |> Map.get_and_update(group_id, fn date_percent ->
-                {date_percent, date_percent ++ [{date, (count / target) * 100}]} # TODO This should be the corresponding bucket quota
-              end)
-          next_acc
-        end)
-      |> Enum.map(fn {group_id, percents_by_date} ->
-          {group_id, cumulative_percent_for(range, percents_by_date)}
-        end)
-      |> Enum.into(%{})
+    |> Enum.into(Enum.map(references, fn reference -> {reference.id, []} end) |> Enum.into(%{}))
+    |> Enum.map(fn {group_id, percents_by_date} ->
+      # To make sure the series starts at the same time that the survey
+      percents_by_date = [{started_at |> DateTime.to_date(), 0}] ++ percents_by_date
+
+      percents_by_date = if state == "running" do
+        percents_by_date ++ [{DateTime.utc_now() |> DateTime.to_date(), 0}]
+      else
+        percents_by_date
+      end
+
+      {group_id,
+       cumulative_percents_for_group(
+         percents_by_date,
+         percent_provider(group_id, comparisons, target, buckets)
+       )}
+    end)
+    |> Enum.into(%{})
+  end
+
+  defp cumulative_percents_for_group(
+         percents_by_date,
+         percent_provider,
+         cumulative_percent \\ 0,
+         result \\ []
+       )
+
+  defp cumulative_percents_for_group(_percents_by_date, _percent_provider, 100.0, result) do
+    result
+  end
+
+  defp cumulative_percents_for_group(
+         [{date, count}],
+         percent_provider,
+         cumulative_percent,
+         result
+       ) do
+    result ++ [{date, cumulative_percent |> add_percent(count, percent_provider)}]
+  end
+
+  defp cumulative_percents_for_group(
+         [{first_date, first_count}, {second_date, second_count} | rest_percents_by_date],
+         percent_provider,
+         cumulative_percent,
+         result
+       ) do
+    case Date.diff(second_date, first_date) do
+      0 ->
+        # We already had results for that date and we duplicated the dot
+        cumulative_percents_for_group(
+          [{first_date, max(first_count, second_count)} | rest_percents_by_date],
+          percent_provider,
+          cumulative_percent,
+          result
+        )
+
+      1 ->
+        cumulative_percent = cumulative_percent |> add_percent(first_count, percent_provider)
+
+        cumulative_percents_for_group(
+          [{second_date, second_count} | rest_percents_by_date],
+          percent_provider,
+          cumulative_percent,
+          result ++ [{first_date, cumulative_percent}]
+        )
+
+      _ ->
+        cumulative_percent = cumulative_percent |> add_percent(first_count, percent_provider)
+
+        if second_count > 0 do
+          cumulative_percents_for_group(
+            [
+              {second_date |> Timex.shift(days: -1), 0},
+              {second_date, second_count} | rest_percents_by_date
+            ],
+            percent_provider,
+            cumulative_percent,
+            result ++ [{first_date, cumulative_percent}]
+          )
+        else
+          # We injected today's date with no aditional results
+          # there's no need for an additional point to mark the horizontal line
+          cumulative_percents_for_group(
+            [
+              {second_date, second_count} | rest_percents_by_date
+            ],
+            percent_provider,
+            cumulative_percent,
+            result ++ [{first_date, cumulative_percent}]
+          )
+        end
+    end
+  end
+
+  defp add_percent(cumulative_percent, count, percent_provider) do
+    (cumulative_percent + percent_provider.(count))
+    |> min(100.0)
   end
 
   defp respondents_by_questionnaire_and_disposition(survey) do
-    Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id,
-      group_by: [:state, :disposition, :questionnaire_id],
-      select: {r.state, r.disposition, r.questionnaire_id, count("*")})
+    Ask.RespondentStats.respondent_count(survey_id: ^survey.id, by: [:state, :disposition, :questionnaire_id])
   end
 
   defp respondents_by_questionnaire_mode_and_disposition(survey) do
-    Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id,
-      group_by: [:state, :disposition, :questionnaire_id, :mode],
-      select: {r.state, r.disposition, r.questionnaire_id, r.mode, count("*")})
+    Ask.RespondentStats.respondent_count(survey_id: ^survey.id, by: [:state, :disposition, :questionnaire_id, :mode])
     |> Enum.map(fn({state, disposition, questionnaire_id, mode, count}) ->
       reference_id = if mode && questionnaire_id do
-        "#{questionnaire_id}#{mode |> Enum.join("")}"
+        "#{questionnaire_id}#{mode |> Poison.decode! |> Enum.join("")}"
       else
         nil
       end
@@ -319,58 +429,51 @@ defmodule Ask.RespondentController do
   end
 
   defp respondents_by_mode_and_disposition(survey) do
-    Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id,
-      group_by: [:state, :disposition, :mode],
-      select: {r.state, r.disposition, r.mode, count("*")})
+    Ask.RespondentStats.respondent_count(survey_id: ^survey.id, by: [:state, :disposition, :mode])
   end
 
-  defp respondents_by_bucket_and_disposition(survey) do
-    Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id,
-      group_by: [:state, :disposition, :quota_bucket_id],
-      select: {r.state, r.disposition, r.quota_bucket_id, count("*")})
+  defp respondents_by_bucket_and_disposition(survey, bucket_ids) do
+    Ask.RespondentStats.respondent_count(survey_id: ^survey.id, quota_bucket_id: not_in_list(^bucket_ids), by: [:state, :disposition, :quota_bucket_id])
   end
 
   defp respondents_by_questionnaire_and_completed_at(survey) do
     Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
-      group_by: fragment("questionnaire_id, DATE(updated_at)"),
-      order_by: fragment("DATE(updated_at) ASC"),
-      select: {r.questionnaire_id, fragment("DATE(updated_at)"), count("*")})
+      from r in CompletedRespondents,
+      where: r.survey_id == ^survey.id,
+      group_by: [r.questionnaire_id, r.date],
+      order_by: r.date,
+      select: {r.questionnaire_id, r.date, fragment("CAST(? AS UNSIGNED)", sum(r.count))})
   end
 
   defp respondents_by_questionnaire_mode_and_completed_at(survey) do
     Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
-      group_by: fragment("questionnaire_id, mode, DATE(updated_at)"),
-      order_by: fragment("DATE(updated_at) ASC"),
-      select: {r.questionnaire_id, r.mode, fragment("DATE(updated_at)"), count("*")})
+      from r in CompletedRespondents,
+      where: r.survey_id == ^survey.id and r.questionnaire_id != 0 and r.mode != "",
+      group_by: [r.questionnaire_id, r.mode, r.date],
+      order_by: r.date,
+      select: {r.questionnaire_id, r.mode, r.date, fragment("CAST(? AS UNSIGNED)", sum(r.count))})
     |> Enum.map(fn({questionnaire_id, mode, completed_at, count}) ->
-      reference_id = if mode && questionnaire_id do
-        "#{questionnaire_id}#{mode |> Enum.join("")}"
-      else
-        nil
-      end
-
-      {reference_id, completed_at, count}
+      {"#{questionnaire_id}#{mode |> Poison.decode! |> Enum.join("")}", completed_at, count}
     end)
   end
 
   defp respondents_by_mode_and_completed_at(survey) do
     Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
-      group_by: fragment("mode, DATE(updated_at)"),
-      order_by: fragment("DATE(updated_at) ASC"),
-      select: {r.mode, fragment("DATE(updated_at)"), count("*")})
+      from r in CompletedRespondents,
+      where: r.survey_id == ^survey.id,
+      group_by: [r.mode, r.date],
+      order_by: r.date,
+      select: {r.mode, r.date, fragment("CAST(? AS UNSIGNED)", sum(r.count))})
+    |> Enum.map(fn({mode, completed_at, count}) -> {mode |> Poison.decode! |> Enum.join(""), completed_at, count} end)
   end
 
-  defp respondents_by_quota_bucket_and_completed_at(survey) do
+  defp respondents_by_quota_bucket_and_completed_at(survey, bucket_ids) do
     Repo.all(
-      from r in Respondent, where: r.survey_id == ^survey.id and r.disposition == "completed",
-      group_by: fragment("quota_bucket_id, DATE(updated_at)"),
-      order_by: fragment("DATE(updated_at) ASC"),
-      select: {r.quota_bucket_id, fragment("DATE(updated_at)"), count("*")})
+      from r in CompletedRespondents,
+      where: r.survey_id == ^survey.id and r.quota_bucket_id not in ^bucket_ids,
+      group_by: [r.quota_bucket_id, r.date],
+      order_by: r.date,
+      select: {r.quota_bucket_id, r.date, fragment("CAST(? AS UNSIGNED)", sum(r.count))})
   end
 
   defp add_disposition_percent(respondents_count_by_disposition_and_questionnaire, total_respondents) do
@@ -408,41 +511,56 @@ defmodule Ask.RespondentController do
     |> Enum.uniq
     |> Enum.reject(fn s -> String.length(s) == 0 end)
 
-    dynamic = dynamic([r], r.survey_id == ^survey.id)
+    dynamic = true
 
     dynamic =
       if params["since"] do
-        dynamic([r], r.updated_at > ^params["since"] and ^dynamic)
+        dynamic([r1, r2], r2.updated_at > ^params["since"] and ^dynamic)
       else
         dynamic
       end
 
     dynamic =
       if params["disposition"] do
-        dynamic([r], r.disposition == ^params["disposition"] and ^dynamic)
+        dynamic([r1, r2], r2.disposition == ^params["disposition"] and ^dynamic)
       else
         dynamic
       end
 
     dynamic =
       if params["final"] do
-        dynamic([r], r.state == "completed" and ^dynamic)
+        dynamic([r1, r2], r2.state == "completed" and ^dynamic)
       else
         dynamic
       end
 
-    respondents = Respondent
-    |> where(^dynamic)
-    |> order_by(:id)
-    |> preload(:responses)
+    respondents = Stream.resource(
+      fn -> 0 end,
+      fn last_seen_id ->
+        results = (
+          from r1 in Respondent,
+          join: r2 in Respondent, on: r1.id == r2.id,
+          where: r2.survey_id == ^survey.id and r2.id > ^last_seen_id,
+          where: ^dynamic,
+          order_by: r2.id,
+          limit: 1000,
+          preload: :responses,
+          select: r1
+        ) |> Repo.all;
 
-    render_results(conn, get_format(conn), survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents)
+        case List.last(results) do
+          %{id: last_id} -> {results, last_id}
+          nil -> {:halt, last_seen_id}
+        end
+      end,
+      fn _ -> [] end)
+
+
+    render_results(conn, get_format(conn), project, survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents)
   end
 
-  defp render_results(conn, "json", _survey, _tz_offset, questionnaires, has_comparisons, _all_fields, respondents) do
-    respondents_count = respondents |> Repo.aggregate(:count, :id)
-    respondents = respondents
-    |> Repo.stream
+  defp render_results(conn, "json", _project, survey, _tz_offset, questionnaires, has_comparisons, _all_fields, respondents) do
+    respondents_count = Ask.RespondentStats.respondent_count(survey_id: ^survey.id)
     respondents = if has_comparisons do
       respondents
       |> Stream.map(fn respondent ->
@@ -468,10 +586,20 @@ defmodule Ask.RespondentController do
     conn
   end
 
-  defp render_results(conn, "csv", survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents) do
+  defp render_results(conn, "csv", project, survey, tz_offset, questionnaires, has_comparisons, all_fields, respondents) do
+    stats = survey.mode |> Enum.flat_map(fn(modes) ->
+      modes |> Enum.flat_map(fn(mode) ->
+        case mode do
+          "sms" -> [:total_sent_sms, :total_received_sms]
+          "mobileweb" -> [:total_sent_sms, :total_received_sms]
+          "ivr" -> [:total_call_time]
+          _ -> []
+        end
+      end)
+    end) |> Enum.uniq
+
     # Now traverse each respondent and create a row for it
     csv_rows = respondents
-    |> Repo.stream
     |> Stream.map(fn respondent ->
         row = [respondent.hashed_number]
         responses = respondent.responses
@@ -538,6 +666,10 @@ defmodule Ask.RespondentController do
 
         row = row ++ [Respondent.show_disposition(respondent.disposition)]
 
+        row = row ++ Enum.map(stats, fn stat ->
+          apply(Stats, stat, [respondent.stats])
+        end)
+
         row
     end)
 
@@ -550,9 +682,18 @@ defmodule Ask.RespondentController do
       header
     end
     header = header ++ ["Disposition"]
+    header = header ++ Enum.map(stats, fn stat ->
+      case stat do
+        :total_sent_sms -> "Total sent SMS"
+        :total_received_sms -> "Total received SMS"
+        :total_call_time -> "Total call time"
+      end
+    end)
+
     rows = Stream.concat([[header], csv_rows])
 
     filename = csv_filename(survey, "respondents")
+    ActivityLog.download(project, conn, survey, "survey_results") |> Repo.insert
     conn |> csv_stream(rows, filename)
   end
 
@@ -583,7 +724,9 @@ defmodule Ask.RespondentController do
     rows = Stream.concat([[header], csv_rows])
 
     filename = csv_filename(survey, "respondents_disposition_history")
-    conn |> csv_stream(rows, filename)
+    ActivityLog.download(project, conn, survey, "disposition_history") |> Repo.insert
+    {:ok, conn} = Repo.transaction(fn -> conn |> csv_stream(rows, filename) end)
+    conn
   end
 
   def incentives(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
@@ -608,7 +751,9 @@ defmodule Ask.RespondentController do
     rows = Stream.concat([[header], csv_rows])
 
     filename = csv_filename(survey, "respondents_incentives")
-    conn |> csv_stream(rows, filename)
+    ActivityLog.download(project, conn, survey, "incentives") |> Repo.insert
+    {:ok, conn} = Repo.transaction(fn -> conn |> csv_stream(rows, filename) end)
+    conn
   end
 
   def interactions(conn, %{"project_id" => project_id, "survey_id" => survey_id}) do
@@ -649,7 +794,9 @@ defmodule Ask.RespondentController do
     rows = Stream.concat([[header], csv_rows])
 
     filename = csv_filename(survey, "respondents_interactions")
-    conn |> csv_stream(rows, filename)
+    ActivityLog.download(project, conn, survey, "interactions") |> Repo.insert
+    {:ok, conn} = Repo.transaction(fn -> conn |> csv_stream(rows, filename) end)
+    conn
   end
 
   defp mask_phone_numbers(respondents) do

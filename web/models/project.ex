@@ -5,11 +5,15 @@ defmodule Ask.Project do
     field :name, :string
     field :salt, :string
     field :colour_scheme, :string
+    field :archived, :boolean, default: false
 
     has_many :questionnaires, Ask.Questionnaire
     has_many :surveys, Ask.Survey
     many_to_many :users, Ask.User, join_through: Ask.ProjectMembership, on_replace: :delete
     has_many :project_memberships, Ask.ProjectMembership
+    many_to_many :channels, Ask.Channel, join_through: Ask.ProjectChannel, on_replace: :delete
+    has_many :project_channels, Ask.ProjectChannel
+    has_many :activity_logs, Ask.ActivityLog
 
     timestamps()
   end
@@ -19,7 +23,7 @@ defmodule Ask.Project do
   """
   def changeset(struct, params \\ %{}) do
     struct
-    |> cast(params, [:name, :salt, :colour_scheme])
+    |> cast(params, [:name, :salt, :colour_scheme, :archived])
     |> validate_colour_scheme
   end
 

@@ -22,7 +22,7 @@ defmodule Ask.StepBuilder do
   end
 
   def numeric_step(id: id, title: title, prompt: prompt, store: store,
-    skip_logic: skip_logic, refusal: refusal) do
+    skip_logic: skip_logic, alphabetical_answers: alphabetical_answers, refusal: refusal) do
     base = %{
       "id" => id,
       "type" => "numeric",
@@ -30,6 +30,7 @@ defmodule Ask.StepBuilder do
       "prompt" => prompt,
       "store" => store,
       "refusal" => refusal,
+      "alphabetical_answers" => alphabetical_answers
     }
     Map.merge(base, skip_logic)
   end
@@ -220,6 +221,7 @@ defmodule Ask.DummySteps do
             ),
           store: "Perfect Number",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: nil
         ),
         numeric_step(
@@ -231,6 +233,7 @@ defmodule Ask.DummySteps do
             ),
           store: "Question",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: nil
         )
       ]
@@ -281,7 +284,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         multiple_choice_step(
           id: Ecto.UUID.generate,
@@ -307,6 +310,7 @@ defmodule Ask.DummySteps do
           prompt: prompt(sms: sms_prompt("Which is the second perfect number??")),
           store: "Perfect Number",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: nil
         ),
         flag_step(
@@ -317,7 +321,7 @@ defmodule Ask.DummySteps do
         flag_step( # This step is here to make sure we ignore this change
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         numeric_step(
           id: Ecto.UUID.generate,
@@ -325,6 +329,7 @@ defmodule Ask.DummySteps do
           prompt: prompt(sms: sms_prompt("What's the number of this question??")),
           store: "Question",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: nil
         )
       ]
@@ -397,6 +402,7 @@ defmodule Ask.DummySteps do
                 }
               ]
             ),
+            alphabetical_answers: true,
             refusal: nil
           ),
           multiple_choice_step(
@@ -451,7 +457,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         multiple_choice_step(
           id: "bbb",
@@ -551,7 +557,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "bbb",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         explanation_step(
           id: "ccc",
@@ -567,7 +573,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         )
       ]
 
@@ -599,7 +605,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         multiple_choice_step(
           id: "bbb",
@@ -690,7 +696,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "aaa",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         multiple_choice_step(
           id: "eee",
@@ -767,7 +773,7 @@ defmodule Ask.DummySteps do
         flag_step(
           id: "s3",
           title: "Let there be rock",
-          disposition: "partial"
+          disposition: "interim partial"
         ),
         multiple_choice_step(
           id: "s4",
@@ -789,6 +795,7 @@ defmodule Ask.DummySteps do
             ),
           store: "Perfect Number",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: %{
             "enabled" => true,
             "responses" => %{
@@ -807,6 +814,7 @@ defmodule Ask.DummySteps do
             ),
           store: "Question",
           skip_logic: default_numeric_skip_logic(),
+          alphabetical_answers: false,
           refusal: nil
         )
       ]

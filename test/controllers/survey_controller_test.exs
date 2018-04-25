@@ -3,7 +3,7 @@ defmodule Ask.SurveyControllerTest do
   use Ask.TestHelpers
   use Ask.DummySteps
 
-  alias Ask.{Survey, Project, RespondentGroup, Respondent, Response, Channel, SurveyQuestionnaire, RespondentDispositionHistory, TestChannel, RespondentGroupChannel}
+  alias Ask.{Survey, Project, RespondentGroup, Respondent, Response, Channel, SurveyQuestionnaire, RespondentDispositionHistory, TestChannel, RespondentGroupChannel, ShortLink, ActivityLog}
   alias Ask.Runtime.{Flow, Session}
   alias Ask.Runtime.SessionModeProvider
 
@@ -35,7 +35,7 @@ defmodule Ask.SurveyControllerTest do
       conn = get conn, project_survey_path(conn, :index, project.id)
 
       assert json_response(conn, 200)["data"] == [
-        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "not_ready", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at)}
+        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "not_ready", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => DateTime.to_iso8601(survey.updated_at)}
       ]
     end
 
@@ -48,7 +48,7 @@ defmodule Ask.SurveyControllerTest do
       conn = get conn, project_survey_path(conn, :index, project.id, state: "running")
 
       assert json_response(conn, 200)["data"] == [
-        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "running", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at)}
+        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "running", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => DateTime.to_iso8601(survey.updated_at)}
       ]
     end
 
@@ -61,7 +61,7 @@ defmodule Ask.SurveyControllerTest do
       conn = get conn, project_survey_path(conn, :index, project.id, state: "completed")
 
       assert json_response(conn, 200)["data"] == [
-        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "terminated", "exit_code" => 0, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at)}
+        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "terminated", "exit_code" => 0, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => DateTime.to_iso8601(survey.updated_at)}
       ]
     end
 
@@ -74,7 +74,7 @@ defmodule Ask.SurveyControllerTest do
       conn = get conn, project_survey_path(conn, :index, project.id, %{"since" => Timex.format!(Timex.shift(Timex.now, hours: 2), "%FT%T%:z", :strftime)})
 
       assert json_response(conn, 200)["data"] == [
-        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "running", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at)}
+        %{"cutoff" => survey.cutoff, "id" => survey.id, "mode" => survey.mode, "name" => survey.name, "project_id" => project.id, "state" => "running", "exit_code" => nil, "exit_message" => nil, "schedule" => %{"blocked_days" => [], "day_of_week" => %{"fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true}, "end_time" => "23:59:59", "start_time" => "00:00:00", "timezone" => "Etc/UTC"}, "next_schedule_time" => nil, "updated_at" => DateTime.to_iso8601(survey.updated_at)}
       ]
     end
 
@@ -125,11 +125,12 @@ defmodule Ask.SurveyControllerTest do
         "sms_retry_configuration" => nil,
         "mobileweb_retry_configuration" => nil,
         "fallback_delay" => nil,
-        "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at),
+        "updated_at" => DateTime.to_iso8601(survey.updated_at),
         "quotas" => %{
           "vars" => [],
           "buckets" => []
         },
+        "links" => [],
         "comparisons" => [],
         "next_schedule_time" => nil,
       }
@@ -170,7 +171,7 @@ defmodule Ask.SurveyControllerTest do
         "sms_retry_configuration" => nil,
         "mobileweb_retry_configuration" => nil,
         "fallback_delay" => nil,
-        "updated_at" => NaiveDateTime.to_iso8601(survey.updated_at),
+        "updated_at" => DateTime.to_iso8601(survey.updated_at),
         "quotas" => %{
           "vars" => ["gender", "smokes"],
           "buckets" => [
@@ -196,8 +197,127 @@ defmodule Ask.SurveyControllerTest do
             },
           ]
         },
+        "links" => [],
         "comparisons" => [],
         "next_schedule_time" => nil
+      }
+    end
+
+    test "shows chosen resource with download links", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+      survey = Survey |> Repo.get(survey.id)
+      {:ok, result_link} = ShortLink.generate_link(Survey.link_name(survey, :results), "foo")
+      {:ok, incentives_link} = ShortLink.generate_link(Survey.link_name(survey, :incentives), "bar")
+      {:ok, interactions_link} = ShortLink.generate_link(Survey.link_name(survey, :interactions), "baz")
+      {:ok, disposition_history_link} = ShortLink.generate_link(Survey.link_name(survey, :disposition_history), "bae")
+
+      conn = get conn, project_survey_path(conn, :show, project, survey)
+
+      assert json_response(conn, 200)["data"] == %{"id" => survey.id,
+        "name" => survey.name,
+        "mode" => survey.mode,
+        "project_id" => survey.project_id,
+        "questionnaire_ids" => [],
+        "cutoff" => nil,
+        "count_partial_results" => false,
+        "state" => "not_ready",
+        "exit_code" => nil,
+        "exit_message" => nil,
+        "schedule" => %{
+          "day_of_week" => %{
+            "fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true
+          },
+          "start_time" => "00:00:00",
+          "end_time" => "23:59:59",
+          "timezone" => "Etc/UTC",
+          "blocked_days" => []
+        },
+        "started_at" => "",
+        "ivr_retry_configuration" => nil,
+        "sms_retry_configuration" => nil,
+        "mobileweb_retry_configuration" => nil,
+        "fallback_delay" => nil,
+        "updated_at" => DateTime.to_iso8601(survey.updated_at),
+        "quotas" => %{
+          "vars" => [],
+          "buckets" => []
+        },
+        "links" => [
+          %{
+            "name" => "survey/#{survey.id}/results",
+            "url" => "#{Ask.Endpoint.url}/link/#{result_link.hash}"
+          },
+          %{
+            "name" => "survey/#{survey.id}/incentives",
+            "url" => "#{Ask.Endpoint.url}/link/#{incentives_link.hash}"
+          },
+          %{
+            "name" => "survey/#{survey.id}/interactions",
+            "url" => "#{Ask.Endpoint.url}/link/#{interactions_link.hash}"
+          },
+          %{
+            "name" => "survey/#{survey.id}/disposition_history",
+            "url" => "#{Ask.Endpoint.url}/link/#{disposition_history_link.hash}"
+          },
+        ],
+        "comparisons" => [],
+        "next_schedule_time" => nil,
+      }
+    end
+
+    test "shows chosen resource with available links if reader", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "reader")
+      survey = insert(:survey, project: project)
+      survey = Survey |> Repo.get(survey.id)
+      {:ok, result_link} = ShortLink.generate_link(Survey.link_name(survey, :results), "foo")
+      {:ok, _incentives_link} = ShortLink.generate_link(Survey.link_name(survey, :incentives), "bar")
+      {:ok, _interactions_link} = ShortLink.generate_link(Survey.link_name(survey, :interactions), "baz")
+      {:ok, disposition_history_link} = ShortLink.generate_link(Survey.link_name(survey, :disposition_history), "bae")
+
+      conn = get conn, project_survey_path(conn, :show, project, survey)
+
+      assert json_response(conn, 200)["data"] == %{"id" => survey.id,
+        "name" => survey.name,
+        "mode" => survey.mode,
+        "project_id" => survey.project_id,
+        "questionnaire_ids" => [],
+        "cutoff" => nil,
+        "count_partial_results" => false,
+        "state" => "not_ready",
+        "exit_code" => nil,
+        "exit_message" => nil,
+        "schedule" => %{
+          "day_of_week" => %{
+            "fri" => true, "mon" => true, "sat" => true, "sun" => true, "thu" => true, "tue" => true, "wed" => true
+          },
+          "start_time" => "00:00:00",
+          "end_time" => "23:59:59",
+          "timezone" => "Etc/UTC",
+          "blocked_days" => []
+        },
+        "started_at" => "",
+        "ivr_retry_configuration" => nil,
+        "sms_retry_configuration" => nil,
+        "mobileweb_retry_configuration" => nil,
+        "fallback_delay" => nil,
+        "updated_at" => DateTime.to_iso8601(survey.updated_at),
+        "quotas" => %{
+          "vars" => [],
+          "buckets" => []
+        },
+        "links" => [
+          %{
+            "name" => "survey/#{survey.id}/results",
+            "url" => "#{Ask.Endpoint.url}/link/#{result_link.hash}"
+          },
+          %{
+            "name" => "survey/#{survey.id}/disposition_history",
+            "url" => "#{Ask.Endpoint.url}/link/#{disposition_history_link.hash}"
+          },
+        ],
+        "comparisons" => [],
+        "next_schedule_time" => nil,
       }
     end
 
@@ -243,12 +363,19 @@ defmodule Ask.SurveyControllerTest do
     end
 
     test "updates project updated_at when survey is created", %{conn: conn, user: user} do
-      datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-      project = create_project_for_user(user)
+      {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+      project = create_project_for_user(user, updated_at: datetime)
       post conn, project_survey_path(conn, :create, project.id)
 
       project = Project |> Repo.get(project.id)
-      assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+      assert DateTime.compare(project.updated_at, datetime) == :gt
+    end
+
+    test "forbids creation if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      assert_error_sent :forbidden, fn ->
+        post conn, project_survey_path(conn, :create, project.id)
+      end
     end
   end
 
@@ -438,6 +565,15 @@ defmodule Ask.SurveyControllerTest do
       end
     end
 
+    test "rejects update if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_path(conn, :update, survey.project, survey), survey: @invalid_attrs
+      end
+    end
+
     test "fails if the schedule from is greater or equal to the to", %{conn: conn, user: user} do
       project = create_project_for_user(user)
       survey = insert(:survey, project: project)
@@ -480,14 +616,52 @@ defmodule Ask.SurveyControllerTest do
     end
 
     test "updates project updated_at when survey is updated", %{conn: conn, user: user}  do
-      datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-      project = create_project_for_user(user)
+      {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+      project = create_project_for_user(user, updated_at: datetime)
       survey = insert(:survey, project: project)
 
       put conn, project_survey_path(conn, :update, survey.project, survey), survey: %{name: "New name"}
 
       project = Project |> Repo.get(project.id)
-      assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+      assert DateTime.compare(project.updated_at, datetime) == :gt
+    end
+  end
+
+  describe "set_name" do
+    test "set name of a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      conn = post conn, project_survey_survey_path(conn, :set_name, project, survey), name: "new name"
+
+      assert response(conn, 204)
+      assert Repo.get(Survey, survey.id).name == "new name"
+    end
+
+    test "rejects set_name if the survey doesn't belong to the current user", %{conn: conn} do
+      survey = insert(:survey)
+
+      assert_error_sent :forbidden, fn ->
+        post conn, project_survey_survey_path(conn, :set_name, survey.project, survey), name: "new name"
+      end
+    end
+
+    test "rejects set_name for a project reader", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "reader")
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        post conn, project_survey_survey_path(conn, :set_name, survey.project, survey), name: "new name"
+      end
+    end
+
+    test "rejects set_name if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        post conn, project_survey_survey_path(conn, :set_name, survey.project, survey), name: "new name"
+      end
     end
   end
 
@@ -519,6 +693,15 @@ defmodule Ask.SurveyControllerTest do
       end
     end
 
+    test "forbids delete if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_path(conn, :delete, survey.project, survey)
+      end
+    end
+
     test "reject delete if the survey is running", %{conn: conn, user: user} do
       project = create_project_for_user(user)
       survey = insert(:survey, project: project, state: "running")
@@ -530,14 +713,14 @@ defmodule Ask.SurveyControllerTest do
     end
 
     test "updates project updated_at when survey is deleted", %{conn: conn, user: user}  do
-      datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-      project = create_project_for_user(user)
+      {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+      project = create_project_for_user(user, updated_at: datetime)
       survey = insert(:survey, project: project)
 
       delete conn, project_survey_path(conn, :delete, survey.project, survey)
 
       project = Project |> Repo.get(project.id)
-      assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+      assert DateTime.compare(project.updated_at, datetime) == :gt
     end
 
     test "delete survey and all contents", %{conn: conn, user: user} do
@@ -887,6 +1070,15 @@ defmodule Ask.SurveyControllerTest do
     end
   end
 
+  test "forbids launch if project is archived", %{conn: conn, user: user} do
+    project = create_project_for_user(user, archived: true)
+    survey = insert(:survey, project: project, state: "ready")
+
+    assert_error_sent :forbidden, fn ->
+      post conn, project_survey_survey_path(conn, :launch, survey.project, survey)
+    end
+  end
+
   test "launches a survey with channel", %{conn: conn, user: user} do
     project = create_project_for_user(user)
     survey = insert(:survey, project: project, state: "ready")
@@ -898,7 +1090,9 @@ defmodule Ask.SurveyControllerTest do
 
     assert json_response(conn, 200)
     assert Repo.get(Survey, survey.id).state == "running"
-    assert_received [:prepare, ^test_channel, "http://app.ask.dev/callbacks/test"]
+
+    received_at_uri = "#{Ask.Endpoint.url}/callbacks/test"
+    assert_received [:prepare, ^test_channel, ^received_at_uri]
   end
 
   test "sets started_at with proper datetime value when a survey is launched", %{conn: conn, user: user} do
@@ -913,14 +1107,14 @@ defmodule Ask.SurveyControllerTest do
   end
 
   test "updates project updated_at when a survey is launched", %{conn: conn, user: user}  do
-    datetime = Ecto.DateTime.cast!("2000-01-01 00:00:00")
-    project = create_project_for_user(user)
+    {:ok, datetime, _} = DateTime.from_iso8601("2000-01-01T00:00:00Z")
+    project = create_project_for_user(user, updated_at: datetime)
     survey = insert(:survey, project: project, state: "ready")
 
     post conn, project_survey_survey_path(conn, :launch, survey.project, survey)
 
     project = Project |> Repo.get(project.id)
-    assert Ecto.DateTime.compare((project.updated_at |> NaiveDateTime.to_erl |> Ecto.DateTime.from_erl), datetime) == :gt
+    assert DateTime.compare(project.updated_at, datetime) == :gt
   end
 
   test "stops survey", %{conn: conn, user: user} do
@@ -939,6 +1133,7 @@ defmodule Ask.SurveyControllerTest do
       channel_state: channel_state,
       respondent: r1,
       flow: %Flow{questionnaire: questionnaire},
+      schedule: survey.schedule,
     }
     session = Session.dump(session)
     r1 |> Ask.Respondent.changeset(%{session: session}) |> Repo.update!
@@ -970,6 +1165,7 @@ defmodule Ask.SurveyControllerTest do
       channel_state: channel_state,
       respondent: r1,
       flow: %Flow{questionnaire: questionnaire},
+      schedule: survey.schedule,
     }
     session = Session.dump(session)
     r1 |> Ask.Respondent.changeset(%{session: session}) |> Repo.update!
@@ -997,11 +1193,501 @@ defmodule Ask.SurveyControllerTest do
     project = create_project_for_user(user)
     survey = insert(:survey, project: project, state: "terminated", exit_code: 1)
 
-    conn = post conn, project_survey_survey_path(conn, :stop, survey.project, survey)
+    conn = post conn, project_survey_survey_path(conn, :stop, project, survey)
 
     assert json_response(conn, 200)
     survey = Repo.get(Survey, survey.id)
     assert Survey.cancelled?(survey)
+  end
+
+  describe "download links" do
+    test "results link generation", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+
+      link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/results",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+
+      assert link.target == "/api/v1/projects/#{project.id}/surveys/#{survey.id}/respondents/results?_format=csv"
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/results",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+      assert ShortLink |> Repo.all |> length == 1
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "results")
+
+      new_link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/results",
+        "url" => "#{Ask.Endpoint.url}/link/#{new_link.hash}"
+      }
+
+      assert link.hash != new_link.hash
+      assert link.target == new_link.target
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "results")
+
+      assert response(response, 204)
+      assert [] == ShortLink |> Repo.all()
+    end
+
+    test "incentives link generation", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+
+      link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/incentives",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/incentives",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+      assert ShortLink |> Repo.all |> length == 1
+
+      assert link.target == "/api/v1/projects/#{project.id}/surveys/#{survey.id}/respondents/incentives?_format=csv"
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "incentives")
+
+      new_link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/incentives",
+        "url" => "#{Ask.Endpoint.url}/link/#{new_link.hash}"
+      }
+
+      assert link.hash != new_link.hash
+      assert link.target == new_link.target
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "incentives")
+
+      assert response(response, 204)
+      assert [] == ShortLink |> Repo.all()
+    end
+
+    test "interactions link generation", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+
+      link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/interactions",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/interactions",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+      assert ShortLink |> Repo.all |> length == 1
+
+      assert link.target == "/api/v1/projects/#{project.id}/surveys/#{survey.id}/respondents/interactions?_format=csv"
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "interactions")
+
+      new_link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/interactions",
+        "url" => "#{Ask.Endpoint.url}/link/#{new_link.hash}"
+      }
+
+      assert link.hash != new_link.hash
+      assert link.target == new_link.target
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "interactions")
+
+      assert response(response, 204)
+      assert [] == ShortLink |> Repo.all()
+    end
+
+    test "disposition_history link generation", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+
+      link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/disposition_history",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+      assert link.target == "/api/v1/projects/#{project.id}/surveys/#{survey.id}/respondents/disposition_history?_format=csv"
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/disposition_history",
+        "url" => "#{Ask.Endpoint.url}/link/#{link.hash}"
+      }
+      assert ShortLink |> Repo.all |> length == 1
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "disposition_history")
+
+      new_link = ShortLink |> Repo.one
+
+      assert json_response(response, 200) == %{
+        "name" => "survey/#{survey.id}/disposition_history",
+        "url" => "#{Ask.Endpoint.url}/link/#{new_link.hash}"
+      }
+
+      assert link.hash != new_link.hash
+      assert link.target == new_link.target
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "disposition_history")
+
+      assert response(response, 204)
+      assert [] == ShortLink |> Repo.all()
+    end
+
+    test "forbids readers to create links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "reader")
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "forbids readers to refresh links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "reader")
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "forbids readers to delete links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "reader")
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "forbids to create links if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "forbids to refresh links if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "forbids to delete links if project is archived", %{conn: conn, user: user} do
+      project = create_project_for_user(user, archived: true)
+      survey = insert(:survey, project: project)
+
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "results")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "interactions")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "disposition_history")
+      end
+    end
+
+    test "allows editors to create some links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "editor")
+      survey = insert(:survey, project: project)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      assert response(response, 200)
+
+      response = get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+      assert response(response, 200)
+
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+      end
+
+      assert_error_sent :forbidden, fn ->
+        get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+      end
+    end
+
+    test "allows editors to refresh some links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "editor")
+      survey = insert(:survey, project: project)
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "results")
+      assert response(response, 200)
+
+      response = put conn, project_survey_links_path(conn, :refresh_link, project, survey, "disposition_history")
+      assert response(response, 200)
+
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        put conn, project_survey_links_path(conn, :refresh_link, project, survey, "interactions")
+      end
+    end
+
+    test "forbids editor to delete some links", %{conn: conn, user: user} do
+      project = create_project_for_user(user, level: "editor")
+      survey = insert(:survey, project: project)
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "results")
+      assert response(response, 204)
+
+      response = delete conn, project_survey_links_path(conn, :delete_link, project, survey, "disposition_history")
+      assert response(response, 204)
+
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "incentives")
+      end
+      assert_error_sent :forbidden, fn ->
+        delete conn, project_survey_links_path(conn, :delete_link, project, survey, "interactions")
+      end
+    end
+  end
+
+  describe "activity logs" do
+    setup %{conn: conn} do
+      remote_ip = {192, 168, 0, 128}
+      conn = %{conn | remote_ip: remote_ip}
+      {:ok, conn: conn, remote_ip: remote_ip}
+    end
+
+    test "generates logs for results link", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "results")
+      activity_log_create = ActivityLog |> where([log], log.action == "enable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_create, user: user, project: project, survey: survey, action: "enable_public_link", report_type: "survey_results", remote_ip: "192.168.0.128"})
+
+      put conn, project_survey_links_path(conn, :refresh_link, project, survey, "results")
+      activity_log_regenerate = ActivityLog |> where([log], log.action == "regenerate_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_regenerate, user: user, project: project, survey: survey, action: "regenerate_public_link", report_type: "survey_results", remote_ip: "192.168.0.128"})
+
+      delete conn, project_survey_links_path(conn, :delete_link, project, survey, "results")
+      activity_log_delete = ActivityLog |> where([log], log.action == "disable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_delete, user: user, project: project, survey: survey, action: "disable_public_link", report_type: "survey_results", remote_ip: "192.168.0.128"})
+    end
+
+    test "generates logs for incentives link", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "incentives")
+      activity_log_create = ActivityLog |> where([log], log.action == "enable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_create, user: user, project: project, survey: survey, action: "enable_public_link", report_type: "incentives", remote_ip: "192.168.0.128"})
+
+      put conn, project_survey_links_path(conn, :refresh_link, project, survey, "incentives")
+      activity_log_regenerate = ActivityLog |> where([log], log.action == "regenerate_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_regenerate, user: user, project: project, survey: survey, action: "regenerate_public_link", report_type: "incentives", remote_ip: "192.168.0.128"})
+
+      delete conn, project_survey_links_path(conn, :delete_link, project, survey, "incentives")
+      activity_log_delete = ActivityLog |> where([log], log.action == "disable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_delete, user: user, project: project, survey: survey, action: "disable_public_link", report_type: "incentives", remote_ip: "192.168.0.128"})
+    end
+
+    test "generates logs for interactions link", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "interactions")
+      activity_log_create = ActivityLog |> where([log], log.action == "enable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_create, user: user, project: project, survey: survey, action: "enable_public_link", report_type: "interactions", remote_ip: "192.168.0.128"})
+
+      put conn, project_survey_links_path(conn, :refresh_link, project, survey, "interactions")
+      activity_log_regenerate = ActivityLog |> where([log], log.action == "regenerate_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_regenerate, user: user, project: project, survey: survey, action: "regenerate_public_link", report_type: "interactions", remote_ip: "192.168.0.128"})
+
+      delete conn, project_survey_links_path(conn, :delete_link, project, survey, "interactions")
+      activity_log_delete = ActivityLog |> where([log], log.action == "disable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_delete, user: user, project: project, survey: survey, action: "disable_public_link", report_type: "interactions", remote_ip: "192.168.0.128"})
+    end
+
+    test "generates logs for disposition_history link", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      get conn, project_survey_links_path(conn, :create_link, project, survey, "disposition_history")
+      activity_log_create = ActivityLog |> where([log], log.action == "enable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_create, user: user, project: project, survey: survey, action: "enable_public_link", report_type: "disposition_history", remote_ip: "192.168.0.128"})
+
+      put conn, project_survey_links_path(conn, :refresh_link, project, survey, "disposition_history")
+      activity_log_regenerate = ActivityLog |> where([log], log.action == "regenerate_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_regenerate, user: user, project: project, survey: survey, action: "regenerate_public_link", report_type: "disposition_history", remote_ip: "192.168.0.128"})
+
+      delete conn, project_survey_links_path(conn, :delete_link, project, survey, "disposition_history")
+      activity_log_delete = ActivityLog |> where([log], log.action == "disable_public_link") |> Repo.one
+      assert_link_log(%{log: activity_log_delete, user: user, project: project, survey: survey, action: "disable_public_link", report_type: "disposition_history", remote_ip: "192.168.0.128"})
+    end
+
+    test "generates log after creating a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      post conn, project_survey_path(conn, :create, project.id)
+
+      log = ActivityLog |> Repo.one
+      survey = Survey |> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "create", remote_ip: "192.168.0.128", metadata: nil})
+    end
+
+    test "generates log after deleting a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      delete conn, project_survey_path(conn, :delete, survey.project, survey)
+      log = ActivityLog |> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "delete", remote_ip: "192.168.0.128", metadata: %{"survey_name" => survey.name}})
+    end
+
+    test "generates log after launching a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project, state: "ready")
+
+      post conn, project_survey_survey_path(conn, :launch, survey.project, survey)
+      log = ActivityLog |> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "start", remote_ip: "192.168.0.128", metadata: %{"survey_name" => survey.name}})
+    end
+
+    test "generates log after stopping a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project, state: "running")
+
+      post conn, project_survey_survey_path(conn, :stop, survey.project, survey)
+      log = ActivityLog|> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "stop", remote_ip: "192.168.0.128", metadata: %{"survey_name" => survey.name}})
+    end
+
+    test "generates log after updating a survey", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      put conn, project_survey_path(conn, :update, project, survey), survey: %{cutoff: 30}
+      log = ActivityLog|> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "edit", remote_ip: "192.168.0.128", metadata: %{"survey_name" => survey.name}})
+    end
+
+    test "generates rename log if name changed", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      put conn, project_survey_path(conn, :update, project, survey), survey: %{name: "new name", quotas: %{vars: [], buckets: []}, questionnaires: []}
+      log = ActivityLog|> Repo.one
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "rename", remote_ip: "192.168.0.128", metadata: %{"old_survey_name" => survey.name, "new_survey_name" => "new name"}})
+    end
+
+    test "generates both rename and edit log if name and another property changes", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      put conn, project_survey_path(conn, :update, project, survey), survey: %{cutoff: 30, name: "new name"}
+      rename_log = ActivityLog|> where([log], log.action == "rename") |> Repo.one
+      edit_log = ActivityLog|> where([log], log.action == "edit") |> Repo.one
+
+      assert_survey_log(%{log: rename_log, user: user, project: project, survey: survey, action: "rename", remote_ip: "192.168.0.128", metadata: %{"old_survey_name" => survey.name, "new_survey_name" => "new name"}})
+      assert_survey_log(%{log: edit_log, user: user, project: project, survey: survey, action: "edit", remote_ip: "192.168.0.128", metadata: %{"survey_name" => survey.name}})
+    end
+
+    test "generates rename log with set_name action", %{conn: conn, user: user} do
+      project = create_project_for_user(user)
+      survey = insert(:survey, project: project)
+
+      post conn, project_survey_survey_path(conn, :set_name, project, survey), name: "new name"
+      log = ActivityLog |> Repo.one!()
+
+      assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: "rename", remote_ip: "192.168.0.128", metadata: %{"old_survey_name" => survey.name, "new_survey_name" => "new name"}})
+    end
   end
 
   def prepare_for_state_update(user) do
@@ -1035,5 +1721,27 @@ defmodule Ask.SurveyControllerTest do
     end
     add_respondent_to group
     group
+  end
+
+  defp assert_log(log, user, project, survey, action, remote_ip) do
+    assert log.project_id == project.id
+    assert log.user_id == user.id
+    assert log.entity_id == survey.id
+    assert log.entity_type == "survey"
+    assert log.action == action
+    assert log.remote_ip == remote_ip
+  end
+
+  defp assert_link_log(%{log: log, user: user, project: project, survey: survey, action: action, report_type: report_type, remote_ip: remote_ip}) do
+    assert_log(log, user, project, survey, action, remote_ip)
+    assert log.metadata == %{
+      "survey_name" => survey.name,
+      "report_type" => report_type
+    }
+  end
+
+  defp assert_survey_log(%{log: log, user: user, project: project, survey: survey, action: action, remote_ip: remote_ip, metadata: metadata}) do
+    assert_log(log, user, project, survey, action, remote_ip)
+    assert log.metadata == metadata
   end
 end

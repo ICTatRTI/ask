@@ -22,9 +22,7 @@ type State = {
   ranges: Range[]
 };
 
-class StepNumericEditor extends Component {
-  state: State
-
+class StepNumericEditor extends Component<any, State> {
   constructor(props) {
     super(props)
     this.state = this.stateFromProps(props)
@@ -222,6 +220,8 @@ class StepNumericEditor extends Component {
                     <SkipLogic
                       onChange={skipOption => this.skipLogicChange(skipOption, index)}
                       readOnly={readOnly}
+                      errorPath={`${errorPath}.range[${index}].skipLogic`}
+                      errorsByPath={errorsByPath}
                       value={range.skipLogic}
                       stepsAfter={stepsAfter}
                       stepsBefore={stepsBefore}

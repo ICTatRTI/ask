@@ -2,8 +2,10 @@
 import findIndex from 'lodash/findIndex'
 import React, { Component } from 'react'
 import { Input } from 'react-materialize'
+import { connect } from 'react-redux'
 import propsAreEqual from '../../propsAreEqual'
 import { translate } from 'react-i18next'
+import { hasSections } from '../../reducers/questionnaire'
 
 type Props = {
   value: ?string,
@@ -11,6 +13,9 @@ type Props = {
   stepsBefore: Step[],
   stepsAfter: Step[],
   readOnly?: boolean,
+  errorPath: string,
+  errorsByPath: ErrorsByPath,
+  hasSections: boolean,
   t: Function,
   label?: string
 };
@@ -19,10 +24,7 @@ type State = {
   value: ?string
 };
 
-class SkipLogic extends Component {
-  props: Props
-  state: State
-
+class SkipLogic extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
     this.state = { ...this.stateFromProps(props) }
@@ -51,18 +53,10 @@ class SkipLogic extends Component {
   }
 
   skipOptions(currentValue: ?string, stepsAfter: Step[], stepsBefore: Step[]) {
-    const { t } = this.props
-    let currentValueIsValid = false
-
-    if (currentValue == null || currentValue === 'end') {
-      currentValueIsValid = true
-    }
+    const { t, errorPath, errorsByPath, hasSections } = this.props
+    let currentValueIsValid = !errorsByPath[errorPath]
 
     let skipOptions = stepsAfter.slice().map(s => {
-      if (currentValue === s.id) {
-        currentValueIsValid = true
-      }
-
       return {
         id: s.id,
         title: this.stringOrUntitledQuestion(s.title),
@@ -76,13 +70,21 @@ class SkipLogic extends Component {
       enabled: true
     })
 
+    if (hasSections) {
+      skipOptions.unshift({
+        id: 'end_section',
+        title: t('End section'),
+        enabled: true
+      })
+    }
+
     skipOptions.unshift({
       id: '',
       title: t('Next question'),
       enabled: true
     })
 
-    if (!currentValueIsValid && currentValue != null && currentValue != 'end') {
+    if (!currentValueIsValid && currentValue != null && currentValue != 'end' && currentValue != 'end_section') {
       const stepIndex = findIndex(stepsBefore, s => s.id === currentValue)
 
       skipOptions.unshift({
@@ -126,4 +128,11 @@ class SkipLogic extends Component {
   }
 }
 
-export default translate()(SkipLogic)
+const mapStateToProps = (state) => {
+  const steps = state.questionnaire.data.steps
+  return {
+    hasSections: hasSections(steps)
+  }
+}
+
+export default translate()(connect(mapStateToProps)(SkipLogic))

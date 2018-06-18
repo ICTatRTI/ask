@@ -31,10 +31,7 @@ type State = {
   skipLogic: ?string
 };
 
-class FlagStepEditor extends Component {
-  props: Props
-  state: State
-
+class FlagStepEditor extends Component<Props, State> {
   constructor(props) {
     super(props)
     this.state = this.stateFromProps(props)
@@ -74,7 +71,7 @@ class FlagStepEditor extends Component {
   }
 
   render() {
-    const { step, onCollapse, stepsAfter, stepsBefore, onDelete, readOnly, t } = this.props
+    const { step, onCollapse, stepsAfter, stepsBefore, onDelete, readOnly, t, errorPath, errorsByPath } = this.props
 
     return (
       <StepCard onCollapse={onCollapse} readOnly={readOnly} stepId={step.id} stepTitle={this.state.stepTitle} icon={<StepTypeSelector stepType={step.type} stepId={step.id} readOnly={readOnly} />} >
@@ -143,6 +140,8 @@ class FlagStepEditor extends Component {
                 onChange={skipOption => this.skipLogicChange(skipOption)}
                 readOnly={readOnly}
                 value={step.skipLogic}
+                errorPath={`${errorPath}.skipLogic`}
+                errorsByPath={errorsByPath}
                 stepsAfter={stepsAfter}
                 stepsBefore={stepsBefore}
                 label={t('Skip logic')}

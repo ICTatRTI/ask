@@ -54,3 +54,12 @@ i {
     vertical-align: middle;
   }
 }
+
+.no-hover:hover,
+.no-hover:focus {
+  background: none !important;
+}
+
+.n-case {
+  text-transform: none !important;
+}

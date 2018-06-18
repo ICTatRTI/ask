@@ -1,127 +1,129 @@
 // @flow
 import deepFreeze from '../../web/static/vendor/js/deepFreeze'
-const bareQuestionnaire: Questionnaire = {
-  steps: [
-    {
-      type: 'multiple-choice',
-      title: 'Do you smoke?',
-      store: 'Smokes',
-      id: '17141bea-a81c-4227-bdda-f5f69188b0e7',
-      choices: [
-        {
-          value: 'Yes',
-          responses: {
-            sms: {
-              en: [
-                'Yes',
-                'Y',
-                '1'
-              ],
-              'es': [
-                'Sí',
-                'S',
-                '1'
-              ]
-            },
-            ivr: [
+
+const steps = [
+  {
+    type: 'multiple-choice',
+    title: 'Do you smoke?',
+    store: 'Smokes',
+    id: '17141bea-a81c-4227-bdda-f5f69188b0e7',
+    choices: [
+      {
+        value: 'Yes',
+        responses: {
+          sms: {
+            en: [
+              'Yes',
+              'Y',
               '1'
             ],
-            mobileweb: {
-              'en': 'Of course',
-              'es': 'Por supuesto'
-            }
+            'es': [
+              'Sí',
+              'S',
+              '1'
+            ]
           },
-          skipLogic: null
+          ivr: [
+            '1'
+          ],
+          mobileweb: {
+            'en': 'Of course',
+            'es': 'Por supuesto'
+          }
         },
-        {
-          value: 'No',
-          responses: {
-            sms: {
-              'en': [
-                'No',
-                'N',
-                '2'
-              ],
-              'es': [
-                'No',
-                'N',
-                '2'
-              ]
-            },
-            ivr: [
+        skipLogic: null
+      },
+      {
+        value: 'No',
+        responses: {
+          sms: {
+            'en': [
+              'No',
+              'N',
               '2'
             ],
-            mobileweb: {
-              'en': 'Not at all',
-              'es': 'Para nada'
-            }
+            'es': [
+              'No',
+              'N',
+              '2'
+            ]
           },
-          skipLogic: 'b6588daa-cd81-40b1-8cac-ff2e72a15c15'
-        }
-      ],
-      prompt: {
-        'en': {
-          sms: 'Do you smoke?',
-          ivr: {
-            text: 'Do you smoke?',
-            audioSource: 'tts'
-          },
-          mobileweb: 'Do you really smoke?'
+          ivr: [
+            '2'
+          ],
+          mobileweb: {
+            'en': 'Not at all',
+            'es': 'Para nada'
+          }
         },
-        'es': {
-          sms: 'Fumas?'
-        }
+        skipLogic: 'b6588daa-cd81-40b1-8cac-ff2e72a15c15'
       }
-    },
-    {
-      type: 'multiple-choice',
-      title: 'Do you exercise?',
-      store: 'Exercises',
-      id: 'b6588daa-cd81-40b1-8cac-ff2e72a15c15',
-      choices: [
-        {
-          value: 'Yes',
-          responses: {
-            'en': {
-              sms: [
-                'Yes',
-                'Y',
-                '1'
-              ],
-              ivr: [
-                '1'
-              ]
-            }
-          },
-          skipLogic: null
+    ],
+    prompt: {
+      'en': {
+        sms: 'Do you smoke?',
+        ivr: {
+          text: 'Do you smoke?',
+          audioSource: 'tts'
         },
-        {
-          value: 'No',
-          responses: {
-            'en': {
-              sms: [
-                'No',
-                'N',
-                '2'
-              ],
-              ivr: [
-                '2'
-              ]
-            }
-          },
-          skipLogic: null
-        }
-      ],
-      prompt: {
-        'en': {
-          sms: 'Do you exercise?'
-        },
-        'es': {
-          sms: 'Ejercitas?'
-        }
+        mobileweb: 'Do you really smoke?'
+      },
+      'es': {
+        sms: 'Fumas?'
       }
     }
-  ],
+  },
+  {
+    type: 'multiple-choice',
+    title: 'Do you exercise?',
+    store: 'Exercises',
+    id: 'b6588daa-cd81-40b1-8cac-ff2e72a15c15',
+    choices: [
+      {
+        value: 'Yes',
+        responses: {
+          'en': {
+            sms: [
+              'Yes',
+              'Y',
+              '1'
+            ],
+            ivr: [
+              '1'
+            ]
+          }
+        },
+        skipLogic: null
+      },
+      {
+        value: 'No',
+        responses: {
+          'en': {
+            sms: [
+              'No',
+              'N',
+              '2'
+            ],
+            ivr: [
+              '2'
+            ]
+          }
+        },
+        skipLogic: null
+      }
+    ],
+    prompt: {
+      'en': {
+        sms: 'Do you exercise?'
+      },
+      'es': {
+        sms: 'Ejercitas?'
+      }
+    }
+  }
+]
+
+const questionnaireCommonFields = {
   quotaCompletedSteps: null,
   projectId: 1,
   name: 'Foo',
@@ -144,6 +146,117 @@ const bareQuestionnaire: Questionnaire = {
   valid: true
 }
 
+const bareQuestionnaire: Questionnaire = {
+  ...questionnaireCommonFields,
+  steps: steps
+}
+
+const languageSelection = {
+  id: '92283e47-fda4-4ac6-b968-b96fc921dd8d',
+  type: 'language-selection',
+  title: 'Language selection',
+  store: '',
+  prompt: {
+    sms: '1 for English, 2 for Spanish',
+    ivr: {
+      text: '1 para ingles, 2 para español',
+      audioSource: 'tts'
+    }
+  },
+  languageChoices: ['en', 'es']
+}
+
+const quizWithLangSelection = {
+  ...bareQuestionnaire,
+  steps: [languageSelection, ...steps]
+}
+
+const bareQuestionnaireWithSection: Questionnaire = {
+  ...questionnaireCommonFields,
+  name: 'Foo2',
+  steps: [
+    languageSelection,
+    {
+      type: 'section',
+      title: 'Section 1',
+      id: '4108b902-3af4-4c33-bb76-84c8e5029814',
+      steps: steps,
+      randomize: false
+    }
+  ]
+}
+
+const bareQuestionnaireWith2Sections: Questionnaire = {
+  ...questionnaireCommonFields,
+  name: 'Foo2',
+  valid: false,
+  steps: [
+    languageSelection,
+    {
+      type: 'section',
+      title: 'Section 1',
+      id: '4108b902-3af4-4c33-bb76-84c8e5029814',
+      steps: steps,
+      randomize: false
+    },
+    {
+      type: 'section',
+      title: 'Section 2',
+      id: '2a16c315-0fd6-457b-96ab-84d4bcd0ba42',
+      steps: [
+        {
+          type: 'multiple-choice',
+          title: 'Do you like this question?',
+          store: 'likes',
+          id: '9bf3a92d-e604-4af0-9f6b-6d42834a05a0',
+          choices: [
+            {
+              value: 'Yes',
+              responses: {
+                'en': {
+                  sms: [
+                    'Yes',
+                    'Y',
+                    '1'
+                  ],
+                  ivr: [
+                    '1'
+                  ]
+                }
+              },
+              skipLogic: null
+            },
+            {
+              value: 'No',
+              responses: {
+                'en': {
+                  sms: [
+                    'No',
+                    'N',
+                    '2'
+                  ],
+                  ivr: [
+                    '2'
+                  ]
+                }
+              },
+              skipLogic: null
+            }
+          ],
+          prompt: {
+            'en': {
+              sms: 'Do you like this question?'
+            },
+            'es': {
+              sms: 'Te gusta esta pregunta?'
+            }
+          }
+        }],
+      randomize: false
+    }
+  ]
+}
+
 // TODO: investigate why Flow ignores the result of `deepFreeze`
 // It probably is defined as `any` somewhere.
 // As a workaround, we define `bareQuestionnaire` and explicitly annotate it as
@@ -152,6 +265,12 @@ const bareQuestionnaire: Questionnaire = {
 // The limitations of deepFreeze are probably related to sealed objects being used under its hood.
 // See: https://flowtype.org/docs/objects.html#sealed-object-types
 export const questionnaire: Questionnaire = deepFreeze(bareQuestionnaire)
+
+export const questionnaireWithSection: Questionnaire = deepFreeze(bareQuestionnaireWithSection)
+
+export const questionnaireWith2Sections: Questionnaire = deepFreeze(bareQuestionnaireWith2Sections)
+
+export const questionnaireWithLangSelection: Questionnaire = deepFreeze(quizWithLangSelection)
 
 const bareSurvey: Survey = {
   id: 1,
@@ -199,7 +318,9 @@ const bareChannel: Channel = {
   provider: 'nuntium',
   settings: {
     nuntiumChannel: 'Nuntium Channel Name'
-  }
+  },
+  patterns: [],
+  errorsByPath: {}
 }
 
 export const channel: Channel = deepFreeze(bareChannel)
@@ -207,7 +328,8 @@ export const channel: Channel = deepFreeze(bareChannel)
 const bareProject: Project = {
   id: 1,
   name: 'Project Name',
-  updatedAt: '2017-01-10T21:03:19'
+  updatedAt: '2017-01-10T21:03:19',
+  readOnly: false
 }
 
 export const project: Project = deepFreeze(bareProject)

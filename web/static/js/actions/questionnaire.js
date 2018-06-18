@@ -2,6 +2,7 @@
 import * as api from '../api'
 import { newMultipleChoiceStep } from '../reducers/questionnaire'
 import { defaultActiveMode } from '../questionnaire.mode'
+import findIndex from 'lodash/findIndex'
 
 export const FETCH = 'QUESTIONNAIRE_FETCH'
 export const RECEIVE = 'QUESTIONNAIRE_RECEIVE'
@@ -9,11 +10,17 @@ export const CHANGE_NAME = 'QUESTIONNAIRE_CHANGE_NAME'
 export const SET_ACTIVE_MODE = 'QUESTIONNAIRE_SET_ACTIVE_MODE'
 export const ADD_MODE = 'QUESTIONNAIRE_ADD_MODE'
 export const REMOVE_MODE = 'QUESTIONNAIRE_REMOVE_MODE'
+export const ADD_SECTION = 'QUESTIONNAIRE_ADD_SECTION'
+export const TOGGLE_RANDOMIZE_FOR_SECTION = 'QUESTIONNAIRE_TOGGLE_RANDOMIZE_FOR_SECTION'
 export const ADD_STEP = 'QUESTIONNAIRE_ADD_STEP'
+export const ADD_STEP_TO_SECTION = 'QUESTIONNAIRE_ADD_STEP_TO_SECTION'
 export const DELETE_STEP = 'QUESTIONNAIRE_DELETE_STEP'
+export const DELETE_SECTION = 'QUESTIONNAIRE_DELETE_SECTION'
+export const CHANGE_SECTION_TITLE = 'QUESTIONNAIRE_CHANGE_SECTION_TITLE'
 export const ADD_QUOTA_COMPLETED_STEP = 'QUESTIONNAIRE_ADD_QUOTA_COMPLETED_STEP'
 export const MOVE_STEP = 'QUESTIONNAIRE_MOVE_STEP'
 export const MOVE_STEP_TO_TOP = 'QUESTIONNAIRE_MOVE_STEP_TO_TOP'
+export const MOVE_STEP_TO_TOP_OF_SECTION = 'QUESTIONNAIRE_MOVE_STEP_TO_TOP_OF_SECTION'
 export const CHANGE_STEP_TITLE = 'QUESTIONNAIRE_CHANGE_STEP_TITLE'
 export const CHANGE_STEP_TYPE = 'QUESTIONNAIRE_CHANGE_STEP_TYPE'
 export const CHANGE_STEP_PROMPT_SMS = 'QUESTIONNAIRE_CHANGE_STEP_PROMPT_SMS'
@@ -146,6 +153,11 @@ export const deleteStep = (stepId) => ({
   stepId
 })
 
+export const deleteSection = (sectionId) => ({
+  type: DELETE_SECTION,
+  sectionId
+})
+
 export const changeStepStore = (stepId, newStore) => ({
   type: CHANGE_STEP_STORE,
   stepId,
@@ -195,11 +207,31 @@ export const changeStepTitle = (stepId, newTitle) => ({
   newTitle
 })
 
+export const changeSectionTitle = (sectionId, newTitle) => ({
+  type: CHANGE_SECTION_TITLE,
+  sectionId,
+  newTitle
+})
+
 export const changeStepType = (stepId, stepType) => ({
   type: CHANGE_STEP_TYPE,
   stepId,
   stepType
 })
+
+export const addSection = () => ({
+  type: ADD_SECTION
+})
+
+export const toggleRandomizeForSection = (sectionId) => ({
+  type: TOGGLE_RANDOMIZE_FOR_SECTION,
+  sectionId
+})
+
+export const addSectionWithCallback = () => (dispatch, getState) => {
+  dispatch(addSection())
+  return Promise.resolve()
+}
 
 export const addStep = () => ({
   type: ADD_STEP
@@ -211,10 +243,26 @@ export const addStepWithCallback = () => (dispatch, getState) => {
   return Promise.resolve(q.steps[q.steps.length - 1])
 }
 
+export const addStepToSection = (sectionId) => ({
+  type: ADD_STEP_TO_SECTION,
+  sectionId
+})
+
+export const addStepToSectionWithCallback = (sectionId) => (dispatch, getState) => {
+  dispatch(addStepToSection(sectionId))
+  const q = getState().questionnaire.data
+  let sectionIndex = findIndex(q.steps, s => s.id == sectionId)
+  let steps = q.steps[sectionIndex].steps
+
+  return Promise.resolve(steps[steps.length - 1])
+}
+
+export const addQuotaCompletedStepNoCallback = () => ({
+  type: ADD_QUOTA_COMPLETED_STEP
+})
+
 export const addQuotaCompletedStep = () => (dispatch, getState) => {
-  dispatch({
-    type: ADD_QUOTA_COMPLETED_STEP
-  })
+  dispatch(addQuotaCompletedStepNoCallback())
   const q = getState().questionnaire.data
   return Promise.resolve(q.quotaCompletedSteps[q.quotaCompletedSteps.length - 1])
 }
@@ -223,6 +271,12 @@ export const moveStep = (sourceStepId, targetStepId) => ({
   type: MOVE_STEP,
   sourceStepId,
   targetStepId
+})
+
+export const moveStepToTopOfSection = (stepId, sectionId) => ({
+  type: MOVE_STEP_TO_TOP_OF_SECTION,
+  stepId,
+  sectionId
 })
 
 export const moveStepToTop = (stepId) => ({

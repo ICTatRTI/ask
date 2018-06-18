@@ -32,10 +32,7 @@ type State = {
   skipLogic: ?string
 };
 
-class ExplanationStepEditor extends Component {
-  props: Props
-  state: State
-
+class ExplanationStepEditor extends Component<Props, State> {
   constructor(props) {
     super(props)
     this.state = this.stateFromProps(props)
@@ -85,6 +82,8 @@ class ExplanationStepEditor extends Component {
               <SkipLogic
                 onChange={skipOption => this.skipLogicChange(skipOption)}
                 readOnly={readOnly}
+                errorsByPath={errorsByPath}
+                errorPath={`${errorPath}.skipLogic`}
                 value={step.skipLogic}
                 stepsAfter={stepsAfter}
                 stepsBefore={stepsBefore}

@@ -7,6 +7,7 @@ import * as questionnaireActions from '../../actions/questionnaire'
 
 type Props = {
   step: Step,
+  sectionId: string,
   isDragging: boolean,
   isOver: boolean,
   connectDragSource: Function,
@@ -17,9 +18,7 @@ type Props = {
   readOnly: boolean
 };
 
-class DraggableStep extends Component {
-  props: Props
-
+class DraggableStep extends Component<Props> {
   draggableStep() {
     const { step, isDragging, isOver, connectDragSource, children, readOnly } = this.props
 
@@ -64,7 +63,11 @@ export const stepSource = {
 
     if (monitor.didDrop()) {
       if (monitor.getDropResult().step == null) {
-        questionnaireActions.moveStepToTop(step.id)
+        if (monitor.getDropResult().sectionId !== null) {
+          questionnaireActions.moveStepToTopOfSection(step.id, monitor.getDropResult().sectionId)
+        } else {
+          questionnaireActions.moveStepToTop(step.id)
+        }
       } else if (monitor.getDropResult().step.id !== step.id) {
         questionnaireActions.moveStep(step.id, monitor.getDropResult().step.id)
       }
@@ -88,7 +91,7 @@ export const collectTarget = (connect, monitor) => {
 
 export const stepTarget = {
   drop(props, monitor) {
-    return { step: props.step }
+    return { step: props.step, sectionId: props.sectionId }
   }
 }
 

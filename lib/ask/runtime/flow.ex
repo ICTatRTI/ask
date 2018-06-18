@@ -1,5 +1,6 @@
 defmodule Ask.Runtime.Flow do
-  defstruct current_step: nil, questionnaire: nil, mode: nil, language: nil, retries: 0, in_quota_completed_steps: false
+  # current_step: step_index | {section_index, step_index}
+  defstruct current_step: nil, questionnaire: nil, mode: nil, language: nil, retries: 0, in_quota_completed_steps: false, has_sections: false, section_order: nil
   alias Ask.{Repo, Questionnaire}
   alias Ask.Runtime.{Reply, Step}
   alias Ask.Runtime.Flow.Visitor
@@ -8,7 +9,13 @@ defmodule Ask.Runtime.Flow do
   @max_retries 2
 
   def start(quiz, mode) do
-    %Flow{questionnaire: quiz, mode: mode, language: quiz.default_language}
+    has_sections = questionnaire_has_sections(quiz)
+    section_order = if(has_sections) do
+      randomize_sections(quiz)
+    else
+      nil
+    end
+    %Flow{questionnaire: quiz, mode: mode, language: quiz.default_language, has_sections: has_sections, section_order: section_order}
   end
 
   def step(flow, visitor, reply \\ :answer) do
@@ -27,12 +34,66 @@ defmodule Ask.Runtime.Flow do
   end
 
   def dump(flow) do
-    %{current_step: flow.current_step, questionnaire_id: flow.questionnaire.id, mode: flow.mode, language: flow.language, retries: flow.retries, in_quota_completed_steps: flow.in_quota_completed_steps}
+    %{current_step: dump_current_step(flow.current_step), questionnaire_id: flow.questionnaire.id, mode: flow.mode, language: flow.language, retries: flow.retries, in_quota_completed_steps: flow.in_quota_completed_steps, section_order: flow.section_order}
+  end
+
+  def dump_current_step({first, second}) do
+    [first, second]
+  end
+
+  def dump_current_step(number) do
+    number
   end
 
   def load(state) do
     quiz = Repo.get(Questionnaire, state["questionnaire_id"])
-    %Flow{questionnaire: quiz, current_step: state["current_step"], mode: state["mode"], language: state["language"], retries: state["retries"], in_quota_completed_steps: state["in_quota_completed_steps"]}
+    %Flow{questionnaire: quiz, current_step: load_current_step(state["current_step"]), mode: state["mode"], language: state["language"], retries: state["retries"], in_quota_completed_steps: state["in_quota_completed_steps"], has_sections: questionnaire_has_sections(quiz), section_order: state["section_order"]}
+  end
+
+  def load_current_step([first, second]) do
+    {first, second}
+  end
+
+  def load_current_step(number) do
+    number
+  end
+
+  def questionnaire_has_sections(questionnaire) do
+    Enum.any?(questionnaire.steps, fn(step) -> step["type"] == "section" end)
+  end
+
+  defp randomize_sections(questionnaire) do
+    ids_to_randomize = Enum.with_index(questionnaire.steps)
+      |> Enum.flat_map(fn {step, index} ->
+        if step["type"] == "section" && step["randomize"] do
+          [index]
+        else
+          []
+        end
+      end)
+
+    {sections, _} = Enum.with_index(questionnaire.steps)
+      |> Enum.flat_map_reduce(ids_to_randomize, fn({step, index}, acc) ->
+        if step["type"] == "section" && step["randomize"] do
+          extract_random_item(acc)
+        else
+          {[index], acc}
+        end
+      end)
+    sections
+  end
+
+  defp extract_random_item(list) do
+    item = Enum.random(list)
+    {[item], List.delete(list, item)}
+  end
+
+  defp get_section_index(%{current_step: {index, _}}) do
+    index
+  end
+
+  defp get_step_index(%{current_step: {_, index}}) do
+    index
   end
 
   defp next_step_by_skip_logic(flow, step, reply_value, mode) do
@@ -41,8 +102,33 @@ defmodule Ask.Runtime.Flow do
     |> next_step(flow)
   end
 
+  def next_step(nil, %Flow{has_sections: true} = flow), do: advance_step_in_section(flow)
   def next_step(nil, flow), do: flow.current_step + 1
   def next_step("end", flow), do: flow |> end_flow
+  def next_step("end_section", flow) do
+    if flow.section_order do
+      {next_section(get_section_index(flow), flow.section_order), 0}
+    else
+      {get_section_index(flow) + 1, 0}
+    end
+  end
+  def next_step(next_id, %Flow{has_sections: true} = flow) do
+    section_index = get_section_index(flow)
+    {:ok, steps} =
+      flow
+      |> steps
+      |> Enum.at(section_index)
+      |> Map.fetch("steps")
+
+    next_step_index = steps
+      |> Enum.find_index(fn istep -> istep["id"] == next_id end)
+
+    if (!next_step_index || get_step_index(flow) > next_step_index) do
+      raise "Skip logic: invalid step id."
+    else
+      {section_index, next_step_index}
+    end
+  end
   def next_step(next_id, flow) do
     next_step_index =
       flow
@@ -54,6 +140,30 @@ defmodule Ask.Runtime.Flow do
     else
       next_step_index
     end
+  end
+
+  def advance_step_in_section(flow) do
+    section_index = get_section_index(flow)
+    step_index = get_step_index(flow)
+
+    section = flow
+      |> steps
+      |> Enum.at(section_index)
+
+    if section["type"] != "section" || length(section["steps"]) == step_index + 1 do
+      if flow.section_order do
+        {next_section(section_index, flow.section_order), 0}
+      else
+        {section_index + 1, 0}
+      end
+    else
+      {section_index, step_index + 1}
+    end
+  end
+
+  defp next_section(current_section_index, section_order) do
+    current_index = Enum.find_index(section_order, fn(x) -> x == current_section_index end)
+    Enum.at(section_order, current_index + 1)
   end
 
   defp advance_current_step(flow, step, reply_value, mode) do
@@ -70,6 +180,16 @@ defmodule Ask.Runtime.Flow do
 
   def end_flow(flow) do
     length(steps(flow))
+  end
+
+  defp accept_reply(%Flow{current_step: nil, has_sections: true, section_order: nil} = flow, :answer, visitor, _mode) do
+    flow = %{flow | current_step: {0,0}}
+    {flow, %Reply{}, visitor}
+  end
+
+  defp accept_reply(%Flow{current_step: nil, has_sections: true} = flow, :answer, visitor, _mode) do
+    flow = %{flow | current_step: {Enum.at(flow.section_order, 0),0}}
+    {flow, %Reply{}, visitor}
   end
 
   defp accept_reply(%Flow{current_step: nil} = flow, :answer, visitor, _mode) do
@@ -278,10 +398,7 @@ defmodule Ask.Runtime.Flow do
 
   defp compute_progress(flow) do
     current_step_id = current_step(flow)["id"]
-
-    steps = flow
-    |> steps
-    |> Enum.reject(fn step -> step["type"] == "flag" end)
+    steps = get_filtered_steps(flow)
 
     current_step_index = steps
     |> Enum.find_index(fn step -> step["id"] == current_step_id end)
@@ -307,10 +424,51 @@ defmodule Ask.Runtime.Flow do
     {current_step_index, total_steps}
   end
 
+  def get_filtered_steps(%Flow{has_sections: true} = flow) do
+    steps = steps(flow)
+    flow.section_order |> Enum.flat_map(fn (index) ->
+      item = Enum.at(steps, index)
+      case item["type"] do
+        "section" ->
+          item["steps"]
+            |> Enum.reject(fn step -> step["type"] == "flag" end)
+        "flag" -> []
+        _ -> [item]
+      end
+    end)
+  end
+
+  def get_filtered_steps(flow) do
+    flow
+      |> steps
+      |> Enum.reject(fn step -> step["type"] == "flag" end)
+  end
+
+  def current_step(%Flow{has_sections: true} = flow) do
+    case get_section_index(flow) do
+      nil -> nil
+      section_index ->
+        flow
+          |> steps
+          |> Enum.at(section_index)
+          |> get_step_from_section(get_step_index(flow))
+    end
+  end
+
   def current_step(flow) do
     flow
     |> steps
     |> Enum.at(flow.current_step)
+  end
+
+  def get_step_from_section(%{"type" => "section"} = section, index) do
+    section
+      |> Map.get("steps")
+      |> Enum.at(index)
+  end
+
+  def get_step_from_section(step, _) do
+    step
   end
 
   defp has_thank_you_message?(flow) do

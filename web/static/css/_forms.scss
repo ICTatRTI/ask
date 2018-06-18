@@ -254,3 +254,56 @@ label {
     }
   }
 }
+.inputShort {
+  line-height: 1.5;
+  font-style: italic;
+  text-align: center;
+  text-transform: uppercase;
+  color: #039be5;
+  display: inline-flex;
+  min-width: 200px;
+  width: auto !important;
+  height: auto !important;
+  margin-bottom: 0 !important;
+}
+.smallIcon {
+  font-size: 16px;
+  margin-left: 5px;
+}
+
+.channel-pattern {
+  display: flex;
+  border-radius: 5px;
+  padding: 5px;
+  transition: all ease-in .23s;
+
+  .bottom-align {
+    display: flex;
+    /*align-items: flex-end;*/
+    align-items: center;
+  }
+
+  a {
+    display: none;
+    cursor: pointer;
+  }
+
+  &:hover {
+    @extend .grey, .lighten-3;
+    a {
+      display: block;
+    }
+  }
+
+  .error {
+    color: #ff5722;
+    font-size: 14px;
+    margin-top: -18px;
+    margin-bottom: 22px;
+    display: block;
+  }
+
+  .label-error {
+    color: #ff5722;
+  }
+}

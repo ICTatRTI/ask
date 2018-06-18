@@ -1,15 +1,18 @@
 // @flow
 import * as characterCounter from '../characterCounter'
 import { getStepPrompt, splitSmsText, newStepPrompt, newIvrPrompt } from '../step'
+import { hasSections } from './questionnaire'
 
 const k = (...args: any) => args
 
 type ValidationContext = {
   sms: boolean,
   ivr: boolean,
+  mobileweb: boolean,
   activeLanguage: string,
   languages: string[],
-  errors: [ValidationError]
+  errors: ValidationError[],
+  hasSections: boolean
 };
 
 export const validate = (state: DataStore<Questionnaire>) => {
@@ -23,7 +26,8 @@ export const validate = (state: DataStore<Questionnaire>) => {
     mobileweb: data.modes.indexOf('mobileweb') != -1,
     activeLanguage: data.activeLanguage,
     languages: data.languages,
-    errors: state.errors
+    errors: state.errors,
+    hasSections: hasSections(data.steps)
   }
 
   validateSteps(data.steps, context, 'steps')
@@ -84,6 +88,8 @@ const validateStep = (step: Step, stepIndex: number, context: ValidationContext,
       return validateNumericStep(step, stepIndex, context, steps, path)
     case 'explanation':
       return validateExplanationStep(step, stepIndex, context, steps, path)
+    case 'section':
+      return validateSteps(step.steps, context, `${path}.steps`)
     default:
   }
 }
@@ -173,9 +179,16 @@ const validateMobileWebLangPrompt = (prompt: Prompt, context: ValidationContext,
   }
 }
 
-const validSkipLogic = (skipLogic, stepIndex, steps, context) => {
+const skipLogicError = (skipLogic, stepIndex, steps, context) => {
   if (!skipLogic || skipLogic == 'end') {
-    return true
+    return null
+  }
+  if (skipLogic == 'end_section') {
+    if (!context.hasSections) {
+      return k('Cannot jump to end of section if there is no sections')
+    } else {
+      return null
+    }
   }
   let currentValueIsValid = false
   steps.slice(stepIndex + 1).map(s => {
@@ -183,25 +196,31 @@ const validSkipLogic = (skipLogic, stepIndex, steps, context) => {
       currentValueIsValid = true
     }
   })
-  return currentValueIsValid
+  if (!currentValueIsValid) {
+    return k('Cannot jump to a previous step or step outside section')
+  } else {
+    return null
+  }
 }
 
 const validateStepSkipLogic = (step, stepIndex, steps, context, path) => {
-  if (!validSkipLogic(step.skipLogic, stepIndex, steps, context)) {
-    addError(context, `${path}.skipLogic`, k('Cannot jump to a previous step'))
+  const error = skipLogicError(step.skipLogic, stepIndex, steps, context)
+  if (error) {
+    addError(context, `${path}.skipLogic`, error)
   }
 }
 
 const validateChoiceSkipLogic = (choice, stepIndex, choiceIndex, steps, context, path) => {
-  if (!validSkipLogic(choice.skipLogic, stepIndex, steps, context)) {
-    addError(context, `${path}.skipLogic`, k('Cannot jump to a previous step'))
+  const error = skipLogicError(choice.skipLogic, stepIndex, steps, context)
+  if (error) {
+    addError(context, `${path}.skipLogic`, error)
   }
 }
 
-const validateRangeSkipLogic = (range, stepIndex, steps, context, path) => {
-  if (!validSkipLogic(range.skipLogic, stepIndex, steps, context)) {
-    // TODO: missing range info in path
-    addError(context, `${path}.skipLogic`, k('Cannot jump to a previous step'))
+const validateRangeSkipLogic = (range, stepIndex, rangeIndex, steps, context, path) => {
+  const error = skipLogicError(range.skipLogic, stepIndex, steps, context)
+  if (error) {
+    addError(context, `${path}.range[${rangeIndex}].skipLogic`, error)
   }
 }
 
@@ -243,8 +262,8 @@ const validateRangeDelimiters = (step, context, path) => {
 }
 
 const validateRanges = (ranges, stepIndex, context, steps, path) => {
-  for (const range of ranges) {
-    validateRangeSkipLogic(range, stepIndex, steps, context, path)
+  for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex++) {
+    validateRangeSkipLogic(ranges[rangeIndex], stepIndex, rangeIndex, steps, context, path)
   }
 }
 
@@ -493,7 +512,14 @@ const validateDuplicateStepStore = (steps, quotaCompletedSteps, context) => {
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
-    validateDuplicateStepStore0(step, stores, context, `steps[${i}].store`)
+    if (step.type === 'section') {
+      for (let j = 0; j < step.steps.length; j++) {
+        const sectionStep = step.steps[j]
+        validateDuplicateStepStore0(sectionStep, stores, context, `steps[${i}].steps[${j}].store`)
+      }
+    } else {
+      validateDuplicateStepStore0(step, stores, context, `steps[${i}].store`)
+    }
   }
 
   if (quotaCompletedSteps) {

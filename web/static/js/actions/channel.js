@@ -3,18 +3,14 @@ import * as api from '../api'
 
 export const SHARE = 'CHANNEL_SHARE'
 export const REMOVE_SHARED_PROJECT = 'CHANNEL_REMOVE_SHARED_PROJECT'
+export const CREATE_PATTERN = 'CHANNEL_CREATE_PATTERN'
+export const SET_INPUT_PATTERN = 'CHANNEL_SET_INPUT_PATTERN'
+export const SET_OUTPUT_PATTERN = 'CHANNEL_SET_OUTPUT_PATTERN'
+export const REMOVE_PATTERN = 'CHANNEL_REMOVE_PATTERN'
 export const FETCH = 'CHANNEL_FETCH'
 export const RECEIVE = 'CHANNEL_RECEIVE'
 export const SAVING = 'CHANNEL_SAVING'
 export const SAVED = 'CHANNEL_SAVED'
-
-export const createChannel = (projectId: number) => (dispatch: Function, getState: () => Store) =>
-  api.createChannel(projectId).then(response => {
-    const channel = response.result
-    dispatch(fetch(projectId, channel.id))
-    dispatch(receive(channel))
-    return channel
-  })
 
 export const updateChannel = () => (dispatch: Function, getState: () => Store) => {
   dispatch(saving())
@@ -23,9 +19,9 @@ export const updateChannel = () => (dispatch: Function, getState: () => Store) =
   })
 }
 
-export const fetchChannel = (projectId: number, id: number) => (dispatch: Function, getState: () => Store): Channel => {
-  dispatch(fetch(projectId, id))
-  return api.fetchChannel(projectId, id)
+export const fetchChannel = (id: number) => (dispatch: Function, getState: () => Store): Channel => {
+  dispatch(fetch(id))
+  return api.fetchChannel(id)
     .then(response => {
       dispatch(receive(response.entities.channels[response.result]))
     })
@@ -39,9 +35,9 @@ export const fetch = (id: number): FilteredAction => ({
   id
 })
 
-export const fetchChannelIfNeeded = (projectId: number, id: number) => (dispatch: Function, getState: () => Store): Promise<?Channel> => {
-  if (shouldFetch(getState().channel, projectId, id)) {
-    return dispatch(fetchChannel(projectId, id))
+export const fetchChannelIfNeeded = (id: number) => (dispatch: Function, getState: () => Store): Promise<?Channel> => {
+  if (shouldFetch(getState().channel, id)) {
+    return dispatch(fetchChannel(id))
   } else {
     return Promise.resolve(getState().channel.data)
   }
@@ -52,8 +48,8 @@ export const receive = (channel: Channel) => ({
   data: channel
 })
 
-export const shouldFetch = (state: DataStore<Channel>, projectId: number, id: number) => {
-  return !state.fetching || !(state.filter && (state.filter.projectId == projectId && state.filter.id == id))
+export const shouldFetch = (state: DataStore<Channel>, id: number) => {
+  return !state.fetching || !(state.filter && state.filter.id == id)
 }
 
 export const shareWithProject = (projectId: number) => ({
@@ -64,6 +60,27 @@ export const shareWithProject = (projectId: number) => ({
 export const removeSharedProject = (projectId: number) => ({
   type: REMOVE_SHARED_PROJECT,
   projectId
+})
+
+export const createPattern = {
+  type: CREATE_PATTERN
+}
+
+export const setInputPattern = (index: number, value: string) => ({
+  type: SET_INPUT_PATTERN,
+  index,
+  value
+})
+
+export const setOutputPattern = (index: number, value: string) => ({
+  type: SET_OUTPUT_PATTERN,
+  index,
+  value
+})
+
+export const removePattern = (index: number) => ({
+  type: REMOVE_PATTERN,
+  index
 })
 
 export const saving = () => ({
@@ -83,4 +100,20 @@ export const save = () => (dispatch: Function, getState: () => Store) => {
     .then(response =>
        dispatch(saved(response.entities.channels[response.result]))
     )
+}
+
+export const addPattern = () => (dispatch: Function, getState: () => Store) => {
+  dispatch(createPattern)
+}
+
+export const changeInputPattern = (index: number, value: string) => (dispatch: Function, getState: () => Store) => {
+  dispatch(setInputPattern(index, value))
+}
+
+export const changeOutputPattern = (index: number, value: string) => (dispatch: Function, getState: () => Store) => {
+  dispatch(setOutputPattern(index, value))
+}
+
+export const deletePattern = (index: number) => (dispatch: Function, getState: () => Store) => {
+  dispatch(removePattern(index))
 }

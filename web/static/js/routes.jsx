@@ -21,8 +21,10 @@ import CollaboratorIndex from './components/collaborators/CollaboratorIndex'
 import ActivityIndex from './components/activity/ActivityIndex'
 import InviteConfirmation from './components/InviteConfirmation'
 import ChannelEdit from './components/channels/ChannelEdit'
+import ChannelPatterns from './components/channels/ChannelPatterns'
 import ChannelTitle from './components/channels/ChannelTitle'
 import * as questionnaireActions from './actions/questionnaire'
+import ChannelTabs from './components/channels/ChannelTabs'
 
 const k = (s) => s
 
@@ -73,8 +75,11 @@ export default (
 
     <Route path='/channels' title={k('Channels')} >
       <IndexRoute component={ChannelIndex} />
+
       <Route path=':channelId' title={ChannelTitle} >
-        <IndexRoute component={ChannelEdit} />
+        <IndexRedirect to='share' />
+        <Route path='share' components={{ body: ChannelEdit, tabs: ChannelTabs }} />
+        <Route path='patterns' components={{ body: ChannelPatterns, tabs: ChannelTabs }} />
       </Route>
     </Route>
   </Route>
@@ -101,7 +106,8 @@ export const questionnaire = (projectId, questionnaireId) => `${questionnaireInd
 export const editQuestionnaire = (projectId, questionnaireId) => `${questionnaire(projectId, questionnaireId)}/edit`
 export const exportQuestionnaireZip = (projectId, questionnaireId) => `/api/v1${questionnaire(projectId, questionnaireId)}/export_zip`
 export const channels = '/channels'
-export const channel = (id) => `${channels}/${id}`
+export const channelShare = (id) => `${channels}/${id}/share`
+export const channelPatterns = (id) => `${channels}/${id}/patterns`
 
 export const showOrEditSurvey = (s) => {
   if (s.state == 'not_ready' || s.state == 'ready') {

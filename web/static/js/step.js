@@ -1,7 +1,7 @@
 // @flow
 export function getStepPrompt(step: Step, language: string): Prompt {
   let prompt = null
-  if (step.type !== 'flag') {
+  if (step.type !== 'flag' && step.type !== 'section') {
     if (step.type === 'language-selection') {
       prompt = step.prompt
     } else {
@@ -21,7 +21,7 @@ export function setStepPrompt<T: Step>(step: T, language: string, func: (prompt:
       prompt
     }
   } else {
-    if (step.type !== 'flag') {
+    if (step.type !== 'flag' && step.type !== 'section') {
       newStep = {
         ...step,
         prompt: {
@@ -130,6 +130,8 @@ export const icon = (stepType: string): string => {
       return 'chat_bubble_outline'
     case 'flag':
       return 'flag'
+    case 'section':
+      return 'view_stream'
     default:
       throw new Error(`unknown step type: ${stepType}`)
   }

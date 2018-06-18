@@ -1,0 +1,51 @@
+
+// ------- Sections ----------
+
+.section-container {
+  background-color: #d7d7d7;
+  padding: 1rem .5rem 0 .5rem;
+  border-radius: 10px 10px 10px 10px;
+
+  .section-container-header {
+    position: relative;
+    
+    .switch {
+      position: absolute;
+      top: 0px;
+    }
+    .section-number {
+      @extend .grey-text;
+      text-transform: uppercase;
+      text-align: center;
+    }
+    .close-section {
+      @extend .grey-text;
+      position: absolute;
+      right: 10px;
+      top: 0px;
+    }
+    + div {
+      min-height: 1.5rem;
+    }
+  }
+  .card {
+    margin-bottom: 0;
+    .collection {
+      margin-bottom: 0;
+    }
+  }
+  + .section-container {
+    margin-top: 1.5rem;
+  }
+}
+
+div + .section-container {
+  margin-top: 1.5rem;
+}
+.add-step {
+  margin-bottom: 0;
+
+  a {
+    font-size: .95rem;
+  }
+}
